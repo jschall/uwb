@@ -16,24 +16,59 @@
 
 #include "ch.h"
 #include "hal.h"
+#include <profiLED_gen.h>
+
+#define NUM_PROFILEDS 4
+
+static uint8_t txbuf[NUM_PROFILEDS*4];
+
+static const SPIConfig ledSPIConfig =
+{
+    NULL,
+    GPIOA,
+    15,
+    0,
+    SPI_CR2_DS_2 | SPI_CR2_DS_1 | SPI_CR2_DS_0
+};
+
+static void setLEDColor(uint32_t color) {
+    struct profiLED_gen_color_s colors[NUM_PROFILEDS];
+
+    for (uint8_t i=0; i<NUM_PROFILEDS; i++) {
+        profiLED_gen_make_brg_color_hex(color, &colors[i]);
+    }
+
+    uint32_t buf_len = profiLED_gen_write_buf(NUM_PROFILEDS, colors, txbuf, sizeof(txbuf));
+
+    spiAcquireBus(&SPID3);
+    spiStart(&SPID3, &ledSPIConfig);
+    palSetPad(GPIOA, 15);
+//     spiSelect(&SPID3);
+
+    spiSend(&SPID3, buf_len, txbuf);
+
+//     spiUnselect(&SPID3);
+    palClearPad(GPIOA, 15);
+    spiReleaseBus(&SPID3);
+}
 
 /*
  * Green LED blinker thread, times are in milliseconds.
  */
 static THD_WORKING_AREA(waBlinkerThread, 128);
 static THD_FUNCTION(BlinkerThread, arg) {
-
     (void)arg;
     chRegSetThreadName("blinker");
+
     while (true) {
-        palClearPad(GPIOA, 1);
-        chThdSleepMilliseconds(1000);
+        setLEDColor(0xff0000);
         palSetPad(GPIOA, 1);
-        chThdSleepMilliseconds(1000);
+        chThdSleepMilliseconds(500);
+        setLEDColor(0x0000ff);
+        palClearPad(GPIOA, 1);
+        chThdSleepMilliseconds(500);
     }
 }
-
-static SPIConfig led_spicfg = {NULL, GPIOA, 15, 0, 0};
 
 /*
  * Application entry point.
@@ -50,7 +85,13 @@ int main(void) {
      */
     halInit();
     chSysInit();
-    spiInit();
+    spiStart(&SPID3, &ledSPIConfig);
+
+    palSetPadMode(GPIOB, 3, PAL_MODE_ALTERNATE(6) | PAL_STM32_OSPEED_HIGHEST);       /* New SCK.     */
+    palSetPadMode(GPIOB, 4, PAL_MODE_ALTERNATE(6) | PAL_STM32_OSPEED_HIGHEST);       /* New MISO.    */
+    palSetPadMode(GPIOB, 5, PAL_MODE_ALTERNATE(6) | PAL_STM32_OSPEED_HIGHEST);       /* New MOSI.    */
+    palSetPadMode(GPIOA, 15, PAL_MODE_OUTPUT_PUSHPULL | PAL_STM32_OSPEED_HIGHEST);       /* New CS.      */
+    palClearPad(GPIOA, 15);
 
     /*
      * Creates the blinker thread.
@@ -62,8 +103,10 @@ int main(void) {
      * sleeping in a loop and check the button state.
      */
     while (true) {
-// //         palSetPad(GPIOA, 1);
-         chThdSleepMilliseconds(1100);
+//          palSetPad(GPIOA, 1);
+         chThdSleepMilliseconds(500);
+//          palClearPad(GPIOA, 1);
+//          chThdSleepMilliseconds(50);
     }
     return 0;
 }

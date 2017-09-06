@@ -87,6 +87,7 @@ PROJECT = ch
 
 # Imported source files and paths
 CHIBIOS = ./ChibiOS_17.6.0
+
 # Startup files.
 include $(CHIBIOS)/os/common/startup/ARMCMx/compilers/GCC/mk/startup_stm32f3xx.mk
 # HAL-OSAL files (optional).
@@ -106,9 +107,7 @@ BOARDSRC = ./board/board.c
 BOARDINC = ./board
 
 # Define linker script file here
-LDSCRIPT= $(STARTUPLD)/STM32F302x8.ld
-
-$(info $(LDSCRIPT))
+LDSCRIPT = ld/stm32f302x8/bl.ld
 
 # C sources that can be compiled in ARM or THUMB mode depending on the global
 # setting.
@@ -120,7 +119,8 @@ CSRC = $(STARTUPSRC) \
        $(PLATFORMSRC) \
        $(BOARDSRC) \
        $(TESTSRC) \
-       src/main.c
+       src/main.c \
+       src/profiLED_gen.c
 
 # C++ sources that can be compiled in ARM or THUMB mode depending on the global
 # setting.
