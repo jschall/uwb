@@ -20,7 +20,7 @@
 
 #define NUM_PROFILEDS 4
 
-static uint8_t txbuf[NUM_PROFILEDS*4];
+static uint8_t txbuf[NUM_PROFILEDS*4+7];
 
 static const SPIConfig ledSPIConfig =
 {
@@ -33,21 +33,19 @@ static const SPIConfig ledSPIConfig =
 
 static void setLEDColor(uint32_t color) {
     struct profiLED_gen_color_s colors[NUM_PROFILEDS];
-
-    for (uint8_t i=0; i<NUM_PROFILEDS; i++) {
+    uint8_t i;
+    for (i=0; i<NUM_PROFILEDS; i++) {
         profiLED_gen_make_brg_color_hex(color, &colors[i]);
     }
 
-    uint32_t buf_len = profiLED_gen_write_buf(NUM_PROFILEDS, colors, txbuf, sizeof(txbuf));
+    volatile uint32_t buf_len = profiLED_gen_write_buf(NUM_PROFILEDS, colors, txbuf, sizeof(txbuf));
 
     spiAcquireBus(&SPID3);
-    spiStart(&SPID3, &ledSPIConfig);
     palSetPad(GPIOA, 15);
-//     spiSelect(&SPID3);
+    spiStart(&SPID3, &ledSPIConfig);
 
     spiSend(&SPID3, buf_len, txbuf);
 
-//     spiUnselect(&SPID3);
     palClearPad(GPIOA, 15);
     spiReleaseBus(&SPID3);
 }
@@ -87,7 +85,7 @@ int main(void) {
     chSysInit();
     spiStart(&SPID3, &ledSPIConfig);
 
-    palSetPadMode(GPIOB, 3, PAL_MODE_ALTERNATE(6) | PAL_STM32_OSPEED_HIGHEST);       /* New SCK.     */
+    palSetPadMode(GPIOB, 3, PAL_MODE_ALTERNATE(6) | PAL_STM32_OSPEED_HIGHEST | PAL_STM32_PUPDR_PULLDOWN);       /* New SCK.     */
     palSetPadMode(GPIOB, 4, PAL_MODE_ALTERNATE(6) | PAL_STM32_OSPEED_HIGHEST);       /* New MISO.    */
     palSetPadMode(GPIOB, 5, PAL_MODE_ALTERNATE(6) | PAL_STM32_OSPEED_HIGHEST);       /* New MOSI.    */
     palSetPadMode(GPIOA, 15, PAL_MODE_OUTPUT_PUSHPULL | PAL_STM32_OSPEED_HIGHEST);       /* New CS.      */
