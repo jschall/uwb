@@ -86,7 +86,12 @@ endif
 PROJECT = ch
 
 # Imported source files and paths
-CHIBIOS = ./ChibiOS_17.6.0
+OMD_COMMON_DIR = ./modules/omd_common
+CANARD_DIR = ./modules/libcanard
+
+CHIBIOS = $(OMD_COMMON_DIR)/ChibiOS_17.6.0
+
+BOARD ?= com.hex.gnss_1.0
 
 # Startup files.
 include $(CHIBIOS)/os/common/startup/ARMCMx/compilers/GCC/mk/startup_stm32f3xx.mk
@@ -100,14 +105,15 @@ include $(CHIBIOS)/os/common/ports/ARMCMx/compilers/GCC/mk/port_v7m.mk
 # Other files (optional).
 # include $(CHIBIOS)/test/rt/test.mk
 
-# List of all the board related files.
-BOARDSRC = ./board/board.c
+ifneq ($(BOARD),)
+  include boards/$(BOARD)/board.mk
+endif
 
-# Required include directories
-BOARDINC = ./board
+$(info $(BOARDSRC))
 
-# Define linker script file here
-LDSCRIPT = ld/stm32f302x8/bl.ld
+APP_CSRC = $(shell find src -name "*.c")
+COMMON_CSRC = $(shell find $(OMD_COMMON_DIR)/src -name "*.c") $(CANARD_DIR)/canard.c
+COMMON_INC = $(OMD_COMMON_DIR)/include $(CANARD_DIR)
 
 # C sources that can be compiled in ARM or THUMB mode depending on the global
 # setting.
@@ -119,8 +125,8 @@ CSRC = $(STARTUPSRC) \
        $(PLATFORMSRC) \
        $(BOARDSRC) \
        $(TESTSRC) \
-       src/main.c \
-       src/profiLED_gen.c
+       $(APP_CSRC) \
+       $(COMMON_CSRC)
 
 # C++ sources that can be compiled in ARM or THUMB mode depending on the global
 # setting.
@@ -154,7 +160,7 @@ INCDIR = $(CHIBIOS)/os/license \
          $(STARTUPINC) $(KERNINC) $(PORTINC) $(OSALINC) \
          $(HALINC) $(PLATFORMINC) $(BOARDINC) $(TESTINC) \
          $(CHIBIOS)/os/various \
-         ./include
+         ./include $(COMMON_INC)
 
 #
 # Project, sources and paths

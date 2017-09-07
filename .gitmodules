@@ -1,0 +1,6 @@
+[submodule "modules/omd_common"]
+	path = modules/omd_common
+	url = git@github.com:OpenMotorDrive/omd_common.git
+[submodule "modules/libcanard"]
+	path = modules/libcanard
+	url = git@github.com:OpenMotorDrive/libcanard.git

@@ -1,4 +1,5 @@
 #include "hal.h"
+#include <string.h>
 
 #if HAL_USE_PAL || defined(__DOXYGEN__)
 /**
@@ -59,4 +60,13 @@ void __early_init(void) {
 }
 
 void boardInit(void) {
+}
+
+void board_get_unique_id(uint8_t* buf, uint8_t len) {
+    if (len>12) {
+        memset(buf, 0, len);
+        memcpy(buf, (const void*)0x1FFFF7E8, 12);
+    } else {
+        memcpy(buf, (const void*)0x1FFFF7E8, len);
+    }
 }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 #define STM32F302x8
 
 #define VAL_GPIOA_MODER (0xA8000000 | 0x00000004 | (0b01<<30))
@@ -67,12 +69,8 @@
 #define VAL_GPIOG_AFRH 0x00000000
 #define VAL_GPIOH_AFRH 0x00000000
 
+void board_get_unique_id(uint8_t* buf, uint8_t len);
+
 #if !defined(_FROM_ASM_)
-#ifdef __cplusplus
-extern "C" {
-    #endif
-    void boardInit(void);
-    #ifdef __cplusplus
-}
-#endif
+void boardInit(void);
 #endif /* _FROM_ASM_ */
