@@ -5,7 +5,7 @@
 
 # Compiler options here.
 ifeq ($(USE_OPT),)
-  USE_OPT = -Os -ggdb -fomit-frame-pointer -falign-functions=16
+  USE_OPT = -Os -ggdb -fomit-frame-pointer -falign-functions=16 -DGIT_HASH=0x$(shell git rev-parse --short=8 HEAD)
 endif
 
 # C specific options here (added to USE_OPT).
@@ -25,7 +25,7 @@ endif
 
 # Linker extra options here.
 ifeq ($(USE_LDOPT),)
-  USE_LDOPT = 
+  USE_LDOPT = --undefined=shared_app_descriptor,--undefined=shared_app_parameters
 endif
 
 # Enable this if you want link time optimizations (LTO)
@@ -93,6 +93,10 @@ CHIBIOS = $(OMD_COMMON_DIR)/ChibiOS_17.6.0
 
 BOARD ?= com.hex.gnss_1.0
 
+BUILDDIR = build/$(BOARD)
+
+RULESPATH = $(OMD_COMMON_DIR)/rules/ARMCMx
+
 # Startup files.
 include $(CHIBIOS)/os/common/startup/ARMCMx/compilers/GCC/mk/startup_stm32f3xx.mk
 # HAL-OSAL files (optional).
@@ -109,8 +113,6 @@ ifneq ($(BOARD),)
   include boards/$(BOARD)/board.mk
 endif
 
-$(info $(BOARDSRC))
-
 APP_CSRC = $(shell find src -name "*.c")
 COMMON_CSRC = $(shell find $(OMD_COMMON_DIR)/src -name "*.c") $(CANARD_DIR)/canard.c
 COMMON_INC = $(OMD_COMMON_DIR)/include $(CANARD_DIR)
@@ -125,8 +127,8 @@ CSRC = $(STARTUPSRC) \
        $(PLATFORMSRC) \
        $(BOARDSRC) \
        $(TESTSRC) \
-       $(APP_CSRC) \
-       $(COMMON_CSRC)
+       $(COMMON_CSRC) \
+       $(APP_CSRC)
 
 # C++ sources that can be compiled in ARM or THUMB mode depending on the global
 # setting.
@@ -228,5 +230,8 @@ ULIBS =
 # End of user defines
 ##############################################################################
 
-RULESPATH = $(CHIBIOS)/os/common/startup/ARMCMx/compilers/GCC
+LDSCRIPT = $(RULESPATH)/ld/$(TGT_MCU)/app.ld
 include $(RULESPATH)/rules.mk
+
+POST_MAKE_ALL_RULE_HOOK: $(BUILDDIR)/$(PROJECT).bin
+	python $(OMD_COMMON_DIR)/tools/crc_binary.py $(BUILDDIR)/$(PROJECT).bin $(BUILDDIR)/$(PROJECT).bin
