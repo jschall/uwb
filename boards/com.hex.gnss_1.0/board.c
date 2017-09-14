@@ -1,5 +1,5 @@
-#include "hal.h"
 #include <string.h>
+#include <hal.h>
 
 #if HAL_USE_PAL || defined(__DOXYGEN__)
 /**
@@ -60,6 +60,11 @@ void __early_init(void) {
 }
 
 void boardInit(void) {
+    palSetLineMode(BOARD_PAL_LINE_SPI3_SCK, PAL_MODE_ALTERNATE(6) | PAL_STM32_OSPEED_HIGHEST | PAL_STM32_PUPDR_PULLDOWN); // SPI3 SCK
+    palSetLineMode(BOARD_PAL_LINE_SPI3_MISO, PAL_MODE_ALTERNATE(6) | PAL_STM32_OSPEED_HIGHEST); // SPI3 MISO
+    palSetLineMode(BOARD_PAL_LINE_SPI3_MOSI, PAL_MODE_ALTERNATE(6) | PAL_STM32_OSPEED_HIGHEST); // SPI3 MOSI
+    palSetLineMode(BOARD_PAL_LINE_PROFILED_CS, PAL_MODE_OUTPUT_PUSHPULL | PAL_STM32_OSPEED_HIGHEST); // LED CS
+    palSetLine(BOARD_PAL_LINE_BUTTON_LED); // deassert button LED
 }
 
 void board_get_unique_id(uint8_t* buf, uint8_t len) {

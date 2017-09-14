@@ -5,7 +5,6 @@
 #define APP_CONFIG_CAN_LOCAL_NODE_ID 0
 #define APP_CONFIG_CAN_AUTO_BAUD_ENABLE 1
 
-
 static const struct shared_app_parameters_s shared_app_parameters = {
     .boot_delay_sec = APP_CONFIG_BOOT_DELAY_SEC,
     .canbus_disable_auto_baud = !APP_CONFIG_CAN_AUTO_BAUD_ENABLE,

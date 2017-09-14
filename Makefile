@@ -83,7 +83,7 @@ endif
 #
 
 # Define project name here
-PROJECT = ch
+PROJECT = $(notdir $(shell pwd))
 
 # Imported source files and paths
 OMD_COMMON_DIR = ./modules/omd_common
