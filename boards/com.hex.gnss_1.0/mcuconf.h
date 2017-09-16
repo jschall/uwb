@@ -30,36 +30,22 @@
 #define STM32_TIM1SW                        STM32_TIM1SW_PCLK2
 #define STM32_TIM8SW                        STM32_TIM8SW_PCLK2
 #define STM32_RTCSEL                        STM32_RTCSEL_LSI
-#define STM32_USB_CLOCK_REQUIRED            TRUE
+#define STM32_USB_CLOCK_REQUIRED            FALSE
 #define STM32_USBPRE                        STM32_USBPRE_DIV1P5
 
-/*
- * SPI driver system settings.
- */
 #define STM32_SPI_USE_SPI1                  FALSE
 #define STM32_SPI_USE_SPI2                  FALSE
 #define STM32_SPI_USE_SPI3                  TRUE
-// #define STM32_SPI_SPI1_DMA_PRIORITY         1
+#define STM32_SPI_SPI1_DMA_PRIORITY         1
 #define STM32_SPI_SPI2_DMA_PRIORITY         1
 #define STM32_SPI_SPI3_DMA_PRIORITY         1
-// #define STM32_SPI_SPI1_IRQ_PRIORITY         10
+#define STM32_SPI_SPI1_IRQ_PRIORITY         10
 #define STM32_SPI_SPI2_IRQ_PRIORITY         10
 #define STM32_SPI_SPI3_IRQ_PRIORITY         10
 #define STM32_SPI_DMA_ERROR_HOOK(spip)      osalSysHalt("DMA failure")
 
-/*
- * ST driver system settings.
- */
+#define STM32_CAN_USE_CAN1                  TRUE
+#define STM32_CAN_CAN1_IRQ_PRIORITY         11
+
 #define STM32_ST_IRQ_PRIORITY               8
 #define STM32_ST_USE_TIMER                  2
-
-// #define STM32_SPI_USE_SPI1                  FALSE
-// #define STM32_SPI_USE_SPI2                  FALSE
-// #define STM32_SPI_USE_SPI3                  TRUE
-// #define STM32_SPI_SPI1_DMA_PRIORITY         2
-// #define STM32_SPI_SPI2_DMA_PRIORITY         2
-// #define STM32_SPI_SPI3_DMA_PRIORITY         2
-// #define STM32_SPI_SPI1_IRQ_PRIORITY         3
-// #define STM32_SPI_SPI2_IRQ_PRIORITY         3
-// #define STM32_SPI_SPI3_IRQ_PRIORITY         3
-// #define STM32_SPI_DMA_ERROR_HOOK(spip)      osalSysHalt("DMA failure")

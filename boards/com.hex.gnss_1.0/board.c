@@ -65,13 +65,20 @@ void boardInit(void) {
     palSetLineMode(BOARD_PAL_LINE_SPI3_MOSI, PAL_MODE_ALTERNATE(6) | PAL_STM32_OSPEED_HIGHEST); // SPI3 MOSI
     palSetLineMode(BOARD_PAL_LINE_PROFILED_CS, PAL_MODE_OUTPUT_PUSHPULL | PAL_STM32_OSPEED_HIGHEST); // LED CS
     palSetLine(BOARD_PAL_LINE_BUTTON_LED); // deassert button LED
+    palSetLineMode(BOARD_PAL_LINE_CAN_RX, PAL_MODE_ALTERNATE(9) | PAL_STM32_OSPEED_HIGHEST);
+    palSetLineMode(BOARD_PAL_LINE_CAN_TX, PAL_MODE_ALTERNATE(9) | PAL_STM32_OSPEED_HIGHEST);
 }
 
 void board_get_unique_id(uint8_t* buf, uint8_t len) {
+    uint32_t unique_id_uint32[3];
+    unique_id_uint32[0] = ((uint32_t*)0x1FFFF7AC)[2];
+    unique_id_uint32[1] = ((uint32_t*)0x1FFFF7AC)[1];
+    unique_id_uint32[2] = ((uint32_t*)0x1FFFF7AC)[0];
+
     if (len>12) {
         memset(buf, 0, len);
-        memcpy(buf, (const void*)0x1FFFF7E8, 12);
+        memcpy(buf, unique_id_uint32, 12);
     } else {
-        memcpy(buf, (const void*)0x1FFFF7E8, len);
+        memcpy(buf, unique_id_uint32, len);
     }
 }
