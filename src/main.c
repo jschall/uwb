@@ -185,15 +185,15 @@ int main(void) {
 
     struct profiLED_instance_s profileds;
     profiLED_init(&profileds, 3, BOARD_PAL_LINE_PROFILED_CS, true, 4);
-//     profiLED_set_color_rgb(&profileds, 1, 255, 255, 255);
-//     profiLED_update(&profileds);
 
     uint32_t tprev_us = 0;
     while (true) {
         update_canbus_autobaud();
         uavcan_update();
 
-        profiLED_set_color_rgb(&profileds, 1, (sinf(micros()*1e-6f)+1)*127, (sinf(micros()*1e-6f+2)+1)*127, (sinf(micros()*1e-6f+3)+1)*127);
+        for (uint8_t i=0; i<4; i++) {
+            profiLED_set_color_rgb(&profileds, i, (sinf(micros()*1e-6f)+1)*127, (sinf(micros()*1e-6f+2)+1)*127, (sinf(micros()*1e-6f+3)+1)*127);
+        }
         profiLED_update(&profileds);
 
         chThdSleepMicroseconds(16667);
