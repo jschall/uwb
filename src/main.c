@@ -23,7 +23,9 @@
 #include <common/can.h>
 #include <common/uavcan.h>
 #include <common/shared_boot_msg.h>
+#include "dw1000.h"
 #include <string.h>
+#include <stdio.h>
 #include <math.h>
 
 #define CANBUS_AUTOBAUD_SWITCH_INTERVAL_US 1000000
@@ -183,20 +185,30 @@ int main(void) {
 
     begin_canbus_autobaud();
 
-    struct profiLED_instance_s profileds;
-    profiLED_init(&profileds, 3, BOARD_PAL_LINE_PROFILED_CS, true, 4);
-
+    struct dw1000_instance_s uwb_instance;
+    dw1000_init(&uwb_instance, 3, BOARD_PAL_LINE_SPI3_UWB_CS, BOARD_PAL_LINE_UWB_NRST);
+    dw1000_rx_enable(&uwb_instance);
     uint32_t tprev_us = 0;
     while (true) {
         update_canbus_autobaud();
         uavcan_update();
 
-        for (uint8_t i=0; i<4; i++) {
-            profiLED_set_color_rgb(&profileds, i, (sinf(micros()*1e-6f)+1)*127, (sinf(micros()*1e-6f+2)+1)*127, (sinf(micros()*1e-6f+3)+1)*127);
-        }
-        profiLED_update(&profileds);
+        uint32_t tnow_us = micros();
+        if (tnow_us-tprev_us > 250000) {
+            tprev_us = tnow_us;
 
-        chThdSleepMicroseconds(16667);
+//             dw1000_transmit(&uwb_instance);
+            dw1000_try_receive(&uwb_instance);
+
+//             uint16_t deca = 0;
+//             dw1000_read_reg16(&uwb_instance, 0, 2, &deca);
+//
+//             char msg[80];
+//             snprintf(msg, sizeof(msg), "0x%X", deca);
+//             uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", msg);
+        }
+
+        chThdSleepMicroseconds(1000);
     }
     return 0;
 }

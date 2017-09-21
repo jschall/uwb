@@ -60,13 +60,13 @@ endif
 # Stack size to be allocated to the Cortex-M process stack. This stack is
 # the stack used by the main() thread.
 ifeq ($(USE_PROCESS_STACKSIZE),)
-  USE_PROCESS_STACKSIZE = 0x1000
+  USE_PROCESS_STACKSIZE = 0x1500
 endif
 
 # Stack size to the allocated to the Cortex-M main/exceptions stack. This
 # stack is used for processing interrupts and exceptions.
 ifeq ($(USE_EXCEPTIONS_STACKSIZE),)
-  USE_EXCEPTIONS_STACKSIZE = 0x400
+  USE_EXCEPTIONS_STACKSIZE = 0x1000
 endif
 
 # Enables the use of FPU (no, softfp, hard).
@@ -91,7 +91,7 @@ CANARD_DIR = ./modules/libcanard
 
 CHIBIOS = $(OMD_COMMON_DIR)/ChibiOS_17.6.0
 
-BOARD ?= com.hex.gnss_1.0
+BOARD ?= org.proficnc.uwb_1.0
 
 BUILDDIR = build/$(BOARD)
 
@@ -161,6 +161,7 @@ ASMXSRC = $(STARTUPASM) $(PORTASM) $(OSALASM)
 INCDIR = $(CHIBIOS)/os/license \
          $(STARTUPINC) $(KERNINC) $(PORTINC) $(OSALINC) \
          $(HALINC) $(PLATFORMINC) $(BOARDINC) $(TESTINC) \
+         $(CHIBIOS)/community/os/various \
          $(CHIBIOS)/os/various \
          ./include $(COMMON_INC)
 
