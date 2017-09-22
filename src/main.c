@@ -175,6 +175,55 @@ static void on_canbus_baudrate_confirmed(uint32_t canbus_baud) {
     }
 }
 
+static void receiver_run(void) {
+    struct dw1000_instance_s uwb_instance;
+    dw1000_init(&uwb_instance, 3, BOARD_PAL_LINE_SPI3_UWB_CS, BOARD_PAL_LINE_UWB_NRST);
+    dw1000_rx_enable(&uwb_instance);
+    uint32_t tprev_us = 0;
+    while (true) {
+        update_canbus_autobaud();
+        uavcan_update();
+        uint32_t tnow_us = micros();
+        if (tnow_us-tprev_us > 100000) {
+            tprev_us = tnow_us;
+            char rxbuf[50];
+            uint16_t n = dw1000_receive(&uwb_instance, sizeof(rxbuf)-1, rxbuf);
+            if (n > 0) {
+                rxbuf[n] = 0;
+                uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", rxbuf);
+            } else {
+                uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", "no rx");
+            }
+        }
+        chThdSleepMicroseconds(1000);
+    }
+}
+
+static void transmitter_run(void) {
+    struct dw1000_instance_s uwb_instance;
+    dw1000_init(&uwb_instance, 3, BOARD_PAL_LINE_SPI3_UWB_CS, BOARD_PAL_LINE_UWB_NRST);
+    uint32_t tprev_us = 0;
+    uint8_t i=0;
+    while (true) {
+        update_canbus_autobaud();
+        uavcan_update();
+        uint32_t tnow_us = micros();
+        if (tnow_us-tprev_us > 1000000) {
+            tprev_us = tnow_us;
+            char msg[50];
+            int n = snprintf(msg, sizeof(msg), ">>>> message %u <<<<", i);
+            if (n > 0 && n<sizeof(msg)) {
+                dw1000_transmit(&uwb_instance, n, msg);
+                uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", "tx");
+            } else {
+                uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", "no tx");
+            }
+            i++;
+        }
+        chThdSleepMicroseconds(1000);
+    }
+}
+
 int main(void) {
     halInit();
     chSysInit();
@@ -185,30 +234,8 @@ int main(void) {
 
     begin_canbus_autobaud();
 
-    struct dw1000_instance_s uwb_instance;
-    dw1000_init(&uwb_instance, 3, BOARD_PAL_LINE_SPI3_UWB_CS, BOARD_PAL_LINE_UWB_NRST);
-    dw1000_rx_enable(&uwb_instance);
-    uint32_t tprev_us = 0;
-    while (true) {
-        update_canbus_autobaud();
-        uavcan_update();
+//     transmitter_run();
+    receiver_run();
 
-        uint32_t tnow_us = micros();
-        if (tnow_us-tprev_us > 250000) {
-            tprev_us = tnow_us;
-
-//             dw1000_transmit(&uwb_instance);
-            dw1000_try_receive(&uwb_instance);
-
-//             uint16_t deca = 0;
-//             dw1000_read_reg16(&uwb_instance, 0, 2, &deca);
-//
-//             char msg[80];
-//             snprintf(msg, sizeof(msg), "0x%X", deca);
-//             uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", msg);
-        }
-
-        chThdSleepMicroseconds(1000);
-    }
     return 0;
 }

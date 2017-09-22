@@ -8,6 +8,8 @@ struct dw1000_instance_s {
 };
 
 void dw1000_init(struct dw1000_instance_s* instance, uint8_t spi_idx, uint32_t select_line, uint32_t reset_line);
-void dw1000_transmit(struct dw1000_instance_s* instance);
+uint16_t dw1000_receive(struct dw1000_instance_s* instance, uint32_t buf_len, void* buf);
+void dw1000_transmit(struct dw1000_instance_s* instance, uint32_t buf_len, void* buf);
 void dw1000_try_receive(struct dw1000_instance_s* instance);
 void dw1000_rx_enable(struct dw1000_instance_s* instance);
+void dw1000_handle_interrupt(struct dw1000_instance_s* instance);
