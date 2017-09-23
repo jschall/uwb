@@ -30,6 +30,11 @@ void dw1000_init(struct dw1000_instance_s* instance, uint8_t spi_idx, uint32_t s
     sys_cfg.HIRQ_POL = 1;
     sys_cfg.RXAUTR = 1;
     dw1000_write(instance, DW1000_SYSTEM_CONFIGURATION_FILE, 0, sizeof(sys_cfg), &sys_cfg);
+
+    uint32_t pmsc_ctrl1;
+    dw1000_read(instance, 0x36, 0x04, sizeof(pmsc_ctrl1), &pmsc_ctrl1);
+    pmsc_ctrl1 &= ~(1<<17);
+    dw1000_write(instance, 0x36, 0x04, sizeof(pmsc_ctrl1), &pmsc_ctrl1);
 }
 
 void dw1000_rx_enable(struct dw1000_instance_s* instance) {
@@ -60,15 +65,20 @@ uint16_t dw1000_receive(struct dw1000_instance_s* instance, uint32_t buf_len, vo
     }
 
     struct dw1000_sys_status_s sys_status;
+    uint8_t* sys_status_bytes = &sys_status;
     struct dw1000_rx_finfo_s rx_finfo;
     uint16_t ret;
 
     // Read SYS_STATUS
     dw1000_read(instance, DW1000_SYSTEM_EVENT_STATUS_REGISTER_FILE, 0, sizeof(sys_status), &sys_status);
 
+//     char msg[50];
+//     sprintf(msg, "%02X %02X %02X %02X", sys_status_bytes[3], sys_status_bytes[2], sys_status_bytes[1], sys_status_bytes[0]);
+//     uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", msg);
+
     // Check if a good frame is in the buffer
     if (!sys_status.RXFCG) {
-        uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", "!RXFCG");
+//         uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", "!RXFCG");
         return 0;
     }
 
@@ -82,7 +92,7 @@ uint16_t dw1000_receive(struct dw1000_instance_s* instance, uint32_t buf_len, vo
         ret = rx_finfo.RXFLEN-2;
     } else {
         ret = 0; // mitch: include some indication of this failure in the return status struct perhaps. alternatively consider returning what fits.
-        uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", "msg too long");
+//         uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", "msg too long");
     }
 
     // Read SYS_STATUS
@@ -96,7 +106,7 @@ uint16_t dw1000_receive(struct dw1000_instance_s* instance, uint32_t buf_len, vo
         // Receiver must be reset to exit errored state
         dw1000_rx_enable(instance);
 
-        uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", "RXOVRR");
+//         uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", "RXOVRR");
 
         return 0; // mitch: include some indication of this failure in the return status struct perhaps.
     }
@@ -105,13 +115,13 @@ uint16_t dw1000_receive(struct dw1000_instance_s* instance, uint32_t buf_len, vo
     if (sys_status.HSRBP == sys_status.ICRBP) {
         // Mask, clear and unmask RX event flags in SYS_STATUS reg:0F; bits FCE, FCG, DFR, LDE_DONE
         dw1000_clear_double_buffered_status_bits(instance);
-        uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", "clearing status");
+//         uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", "clearing status");
     }
 
     // Issue the HRBPT command
     dw1000_swap_rx_buffers(instance); // mitch: moved out of conditional
 
-    uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", "rxsuccess");
+//     uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", "rxsuccess");
 
 //     dw1000_reset(instance);
 //     dw1000_disable_transceiver(instance);

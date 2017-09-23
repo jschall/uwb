@@ -192,7 +192,7 @@ static void receiver_run(void) {
                 rxbuf[n] = 0;
                 uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", rxbuf);
             } else {
-                uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", "no rx");
+//                 uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", "no rx");
             }
         }
         chThdSleepMicroseconds(1000);
