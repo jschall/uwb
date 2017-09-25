@@ -190,9 +190,7 @@ static void receiver_run(void) {
             uint16_t n = dw1000_receive(&uwb_instance, sizeof(rxbuf)-1, rxbuf);
             if (n > 0) {
                 rxbuf[n] = 0;
-                uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", rxbuf);
-            } else {
-//                 uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", "no rx");
+                uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "rx", rxbuf);
             }
         }
         chThdSleepMicroseconds(1000);
@@ -211,12 +209,10 @@ static void transmitter_run(void) {
         if (tnow_us-tprev_us > 1000000) {
             tprev_us = tnow_us;
             char msg[50];
-            int n = snprintf(msg, sizeof(msg), ">>>> message %u <<<<", i);
+            int n = snprintf(msg, sizeof(msg), "message %u", i);
             if (n > 0 && n<sizeof(msg)) {
                 dw1000_transmit(&uwb_instance, n, msg);
-                uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", "tx");
-            } else {
-                uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "", "no tx");
+                uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "tx", msg);
             }
             i++;
         }
@@ -234,8 +230,8 @@ int main(void) {
 
     begin_canbus_autobaud();
 
-//     transmitter_run();
-    receiver_run();
+    transmitter_run();
+//     receiver_run();
 
     return 0;
 }
