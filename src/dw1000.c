@@ -1,12 +1,10 @@
 #include "dw1000.h"
 #include "dw1000_internal.h"
 #include <hal.h>
-#include <ch.h>
 #include <common/timing.h>
 #include <common/uavcan.h>
 #include <bswap.h>
 
-#include <string.h>
 #include <stdio.h>
 
 static void dw1000_config(struct dw1000_instance_s* instance);
@@ -15,7 +13,6 @@ static void dw1000_read(struct dw1000_instance_s* instance, uint8_t regfile, uin
 static void dw1000_hard_reset(struct dw1000_instance_s* instance);
 static void dw1000_clear_double_buffered_status_bits_and_optionally_disable_transceiver(struct dw1000_instance_s* instance, bool transceiver_disable);
 static void dw1000_clear_double_buffered_status_bits(struct dw1000_instance_s* instance);
-static void dw1000_disable_transceiver(struct dw1000_instance_s* instance);
 static void dw1000_swap_rx_buffers(struct dw1000_instance_s* instance);
 static void dw1000_write8(struct dw1000_instance_s* instance, uint8_t regfile, uint16_t reg, uint8_t val);
 static void dw1000_write16(struct dw1000_instance_s* instance, uint8_t regfile, uint16_t reg, uint16_t val);
@@ -26,295 +23,17 @@ static void dw1000_load_lde_microcode(struct dw1000_instance_s* instance);
 static void dw1000_clock_force_sys_xti(struct dw1000_instance_s* instance);
 static void dw1000_clock_enable_all_seq(struct dw1000_instance_s* instance);
 
-static uint8_t dw1000_get_fs_plltune_val(enum dw1000_channel_t channel) {
-    switch(channel) {
-        case DW1000_CHANNEL_1:
-            return 0x1E;
-        case DW1000_CHANNEL_2:
-        case DW1000_CHANNEL_4:
-            return 0x26;
-        case DW1000_CHANNEL_3:
-            return 0x56;
-        case DW1000_CHANNEL_5:
-        case DW1000_CHANNEL_7:
-            return 0xBE;
-    }
-    return 0;
-}
-
-static uint8_t dw1000_get_tc_pgdelay_val(enum dw1000_channel_t channel) {
-    switch(channel) {
-        case DW1000_CHANNEL_1:
-            return 0xC9;
-        case DW1000_CHANNEL_2:
-            return 0xC2;
-        case DW1000_CHANNEL_3:
-            return 0xC5;
-        case DW1000_CHANNEL_4:
-            return 0x95;
-        case DW1000_CHANNEL_5:
-            return 0xC0;
-        case DW1000_CHANNEL_7:
-            return 0x93;
-    }
-    return 0;
-}
-
-static uint32_t dw1000_get_rf_txctrl_val(enum dw1000_channel_t channel) {
-    switch(channel) {
-        case DW1000_CHANNEL_1:
-            return 0x00005C40;
-        case DW1000_CHANNEL_2:
-            return 0x00045CA0;
-        case DW1000_CHANNEL_3:
-            return 0x00086CC0;
-        case DW1000_CHANNEL_4:
-            return 0x00045C80;
-        case DW1000_CHANNEL_5:
-            return 0x001E3FE0;
-        case DW1000_CHANNEL_7:
-            return 0x001E7DE0;
-    }
-    return 0;
-}
-
-static uint32_t dw1000_get_tx_power_val_prf_16(enum dw1000_channel_t channel) {
-    switch(channel) {
-        case DW1000_CHANNEL_1:
-        case DW1000_CHANNEL_2:
-            return 0x15355575;
-        case DW1000_CHANNEL_3:
-            return 0x0F2F4F6F;
-        case DW1000_CHANNEL_4:
-            return 0x1F1F3F5F;
-        case DW1000_CHANNEL_5:
-            return 0x0E082848;
-        case DW1000_CHANNEL_7:
-            return 0x32527292;
-    }
-    return 0;
-}
-
-static uint32_t dw1000_get_tx_power_val_prf_64(enum dw1000_channel_t channel) {
-    switch(channel) {
-        case DW1000_CHANNEL_1:
-        case DW1000_CHANNEL_2:
-            return 0x07274767;
-        case DW1000_CHANNEL_3:
-            return 0x2B4B6B8B;
-        case DW1000_CHANNEL_4:
-            return 0x3A5A7A9A;
-        case DW1000_CHANNEL_5:
-            return 0x25456585;
-        case DW1000_CHANNEL_7:
-            return 0x5171B1D1;
-    }
-    return 0;
-}
-
-static uint32_t dw1000_get_tx_power_val(enum dw1000_prf_t prf, enum dw1000_channel_t channel) {
-    switch(prf) {
-        case DW1000_PRF_16MHZ:
-            return dw1000_get_tx_power_val_prf_16(channel);
-        case DW1000_PRF_64MHZ:
-            return dw1000_get_tx_power_val_prf_64(channel);
-    }
-    return 0;
-}
-
-static uint32_t dw1000_get_drx_tune2_val_prf_16(enum dw1000_preamble_t preamble) {
-    switch(preamble) {
-        case DW1000_PREAMBLE_64:
-        case DW1000_PREAMBLE_128:
-            // PAC size 8
-            return 0x311A002D;
-        case DW1000_PREAMBLE_256:
-        case DW1000_PREAMBLE_512:
-            // PAC size 16
-            return 0x331A0052;
-        case DW1000_PREAMBLE_1024:
-            // PAC size 32
-            return 0x351A009A;
-        case DW1000_PREAMBLE_1536:
-        case DW1000_PREAMBLE_2048:
-        case DW1000_PREAMBLE_4096:
-            // PAC size 64
-            return 0x371A011D;
-    }
-    return 0;
-}
-
-static uint16_t dw1000_get_drx_tune1a_val(enum dw1000_prf_t prf) {
-    switch(prf) {
-        case DW1000_PRF_16MHZ:
-            return 0x0087;
-        case DW1000_PRF_64MHZ:
-            return 0x008D;
-    }
-    return 0;
-}
-
-static uint32_t dw1000_get_drx_tune2_val_prf_64(enum dw1000_preamble_t preamble) {
-    switch(preamble) {
-        case DW1000_PREAMBLE_64:
-        case DW1000_PREAMBLE_128:
-            return 0x313B006B;
-        case DW1000_PREAMBLE_256:
-        case DW1000_PREAMBLE_512:
-            return 0x333B00BE;
-        case DW1000_PREAMBLE_1024:
-            return 0x353B015E;
-        case DW1000_PREAMBLE_1536:
-        case DW1000_PREAMBLE_2048:
-        case DW1000_PREAMBLE_4096:
-            return 0x373B0296;
-    }
-    return 0;
-}
-
-static uint32_t dw1000_get_drx_tune2_val(enum dw1000_prf_t prf, enum dw1000_preamble_t preamble) {
-    switch(prf) {
-        case DW1000_PRF_16MHZ:
-            return dw1000_get_drx_tune2_val_prf_16(preamble);
-        case DW1000_PRF_64MHZ:
-            return dw1000_get_drx_tune2_val_prf_64(preamble);
-    }
-    return 0;
-}
-
-static uint16_t dw1000_get_agc_tune1_val(enum dw1000_prf_t prf) {
-    switch(prf) {
-        case DW1000_PRF_16MHZ:
-            return 0x8870;
-        case DW1000_PRF_64MHZ:
-            return 0x889B;
-    }
-    return 0;
-}
-
-static uint16_t dw1000_get_lde_cfg2_val(enum dw1000_prf_t prf) {
-    switch(prf) {
-        case DW1000_PRF_16MHZ:
-            return 0x1607;
-        case DW1000_PRF_64MHZ:
-            return 0x0607;
-    }
-    return 0;
-}
-
-static struct dw1000_chan_ctrl_s dw1000_get_chan_ctrl_val_prf_16(enum dw1000_channel_t channel) {
-    struct dw1000_chan_ctrl_s ret;
-    memset(&ret, 0, sizeof(ret));
-    ret.TX_CHAN = channel;
-    ret.RX_CHAN = channel;
-    ret.RXPRF = 0b01;
-
-    switch(channel) {
-        case DW1000_CHANNEL_1:
-            ret.TX_PCODE = 1;
-            ret.RX_PCODE = 1;
-            break;
-        case DW1000_CHANNEL_2:
-        case DW1000_CHANNEL_5:
-            ret.TX_PCODE = 4;
-            ret.RX_PCODE = 4;
-            break;
-        case DW1000_CHANNEL_3:
-            ret.TX_PCODE = 5;
-            ret.RX_PCODE = 5;
-            break;
-        case DW1000_CHANNEL_4:
-        case DW1000_CHANNEL_7:
-            ret.TX_PCODE = 7;
-            ret.RX_PCODE = 7;
-            break;
-    }
-    return ret;
-}
-
-static struct dw1000_chan_ctrl_s dw1000_get_chan_ctrl_val_prf_64(enum dw1000_channel_t channel) {
-    struct dw1000_chan_ctrl_s ret;
-    memset(&ret, 0, sizeof(ret));
-    ret.TX_CHAN = channel;
-    ret.RX_CHAN = channel;
-    ret.RXPRF = 0b10;
-    switch(channel) {
-        case DW1000_CHANNEL_1:
-        case DW1000_CHANNEL_2:
-        case DW1000_CHANNEL_3:
-        case DW1000_CHANNEL_5:
-            ret.TX_PCODE = 9;
-            ret.RX_PCODE = 9;
-            break;
-        case DW1000_CHANNEL_4:
-        case DW1000_CHANNEL_7:
-            ret.TX_PCODE = 17;
-            ret.RX_PCODE = 17;
-            break;
+void dw1000_handle_interrupt(struct dw1000_instance_s* instance) {
+    if (!instance) {
+        return;
     }
 
-    return ret;
-}
+    // Read SYS_STATUS
+    struct dw1000_sys_status_s sys_status;
+    dw1000_read(instance, DW1000_SYSTEM_EVENT_STATUS_REGISTER_FILE, 0, sizeof(sys_status), &sys_status);
 
-static struct dw1000_chan_ctrl_s dw1000_get_chan_ctrl_val(enum dw1000_prf_t prf, enum dw1000_channel_t channel) {
-    switch (prf) {
-        case DW1000_PRF_16MHZ:
-            return dw1000_get_chan_ctrl_val_prf_16(channel);
-        case DW1000_PRF_64MHZ:
-        default:
-            return dw1000_get_chan_ctrl_val_prf_64(channel);
-    }
-}
-
-static struct dw1000_tx_fctrl_s dw1000_get_tx_fctrl_val(enum dw1000_prf_t prf, enum dw1000_preamble_t preamble) {
-    struct dw1000_tx_fctrl_s ret;
-    memset(&ret, 0, sizeof(ret));
-    ret.TXBR = 0b10;
-    switch (prf) {
-        case DW1000_PRF_16MHZ:
-            ret.TXPRF = 0b01;
-            break;
-        case DW1000_PRF_64MHZ:
-            ret.TXPRF = 0b10;
-            break;
-    }
-
-    switch(preamble) {
-        case DW1000_PREAMBLE_64:
-            ret.TXPSR = 0b01;
-            ret.PE =    0b00;
-            break;
-        case DW1000_PREAMBLE_128:
-            ret.TXPSR = 0b01;
-            ret.PE =    0b01;
-            break;
-        case DW1000_PREAMBLE_256:
-            ret.TXPSR = 0b01;
-            ret.PE =    0b10;
-            break;
-        case DW1000_PREAMBLE_512:
-            ret.TXPSR = 0b01;
-            ret.PE =    0b11;
-            break;
-        case DW1000_PREAMBLE_1024:
-            ret.TXPSR = 0b10;
-            ret.PE =    0b00;
-            break;
-        case DW1000_PREAMBLE_1536:
-            ret.TXPSR = 0b10;
-            ret.PE =    0b01;
-            break;
-        case DW1000_PREAMBLE_2048:
-            ret.TXPSR = 0b10;
-            ret.PE =    0b10;
-            break;
-        case DW1000_PREAMBLE_4096:
-            ret.TXPSR = 0b11;
-            ret.PE =    0b00;
-            break;
-    }
-
-    return ret;
+    // Clear SYS_STATUS bits
+    dw1000_write(instance, DW1000_SYSTEM_EVENT_STATUS_REGISTER_FILE, 0, sizeof(sys_status), &sys_status);
 }
 
 void dw1000_init(struct dw1000_instance_s* instance, uint8_t spi_idx, uint32_t select_line, uint32_t reset_line) {
@@ -333,6 +52,12 @@ void dw1000_init(struct dw1000_instance_s* instance, uint8_t spi_idx, uint32_t s
 
     spi_device_init(&instance->spi_dev, spi_idx, select_line, 3000000, 8, 0);
     instance->reset_line = reset_line;
+    instance->config.prf = DW1000_PRF_64MHZ;
+    instance->config.preamble = DW1000_PREAMBLE_128;
+    instance->config.channel = DW1000_CHANNEL_7;
+    instance->config.data_rate = DW1000_DATA_RATE_6_8M;
+    instance->config.pcode = dw1000_conf_get_default_pcode(instance->config);
+
     dw1000_hard_reset(instance);
 
     // NOTE: Per DW1000 API: this makes OTP read reliable
@@ -354,67 +79,192 @@ static void dw1000_config(struct dw1000_instance_s* instance) {
         return;
     }
 
-    const enum dw1000_prf_t prf = DW1000_PRF_64MHZ;
-    const enum dw1000_preamble_t preamble = DW1000_PREAMBLE_128;
-    const enum dw1000_channel_t channel = DW1000_CHANNEL_7;
+    struct dw1000_config_s config = instance->config;
 
-    // TODO accept parameter(s) for channel, power, and other configurations
-
-    // DW1000 User Manual Section 2.5.5.1
-    dw1000_write16(instance, 0x23, 0x04, dw1000_get_agc_tune1_val(prf));
-
-    // DW1000 User Manual Section 2.5.5.2
-    dw1000_write32(instance, 0x23, 0x0C, 0x2502A907);
-
-    // DW1000 User Manual Section 2.5.5.3
-    dw1000_write32(instance, 0x27, 0x08, dw1000_get_drx_tune2_val(prf, preamble));
-
-    // DW1000 User Manual Section 2.5.5.4
-    dw1000_write8(instance, 0x2E, 0x0806, 0x0D);
-
-    // DW1000 User Manual Section 2.5.5.5
-    dw1000_write16(instance, 0x2E, 0x1806, dw1000_get_lde_cfg2_val(prf));
-
-    // DW1000 User Manual Section 2.5.5.6
-    // NOTE: will need to change for channel != 5, refer to Table 19
-    dw1000_write32(instance, 0x1E, 0x00, dw1000_get_tx_power_val(prf, channel));
-
-    // DW1000 User Manual Section 2.5.5.7
-    // NOTE: will need to change for channel != 5, refer to Table 36
-    dw1000_write32(instance, 0x28, 0x0C, dw1000_get_rf_txctrl_val(channel));
-
-    // DW1000 User Manual Section 2.5.5.8
-    // NOTE: will need to change for channel != 5, refer to Table 38
-    dw1000_write8(instance, 0x2A, 0x0B, dw1000_get_tc_pgdelay_val(channel));
-
-    // DW1000 User Manual Section 2.5.5.9
-    // NOTE: will need to change for channel != 5 or 7, refer to Table 42
-    dw1000_write8(instance, 0x2B, 0x0B, dw1000_get_fs_plltune_val(channel));
-
-    dw1000_write16(instance, 0x27, 0x04, dw1000_get_drx_tune1a_val(prf));
-
-    // Set channel control parameters
+    // Register-by-register:
+    //   ID     Len  Name        Comment
+    // 0x00       4  DEV_ID      not config
+    // 0x01       8  EUI         TODO
+    // 0x03       4  PANADR      TODO
+    // 0x04       4  SYS_CFG     -
     {
-        struct dw1000_chan_ctrl_s chan_ctrl = dw1000_get_chan_ctrl_val(prf, channel);
-        dw1000_write(instance, 0x1F, 0x00, sizeof(chan_ctrl), &chan_ctrl);
-    }
-
-    // Set xtal trim to mid value
-//     dw1000_write8(instance, 0x2B, 0x0E, 0x6F);
-
-    // Enable rx auto-re-enable and rx double-buffering
-    {
+        // [0x00:0x03] SYS_CFG
+        // Enable rx auto-re-enable and rx double-buffering
         struct dw1000_sys_cfg_s sys_cfg;
         memset(&sys_cfg, 0, sizeof(sys_cfg));
         sys_cfg.HIRQ_POL = 1;
         sys_cfg.RXAUTR = 1;
         dw1000_write(instance, DW1000_SYSTEM_CONFIGURATION_FILE, 0, sizeof(sys_cfg), &sys_cfg);
     }
-
-    // Configure tx parameters
+    // 0x06       5  SYS_TIME    not config
+    // 0x08       5  TX_FCTRL    -
     {
-        struct dw1000_tx_fctrl_s tx_fctrl = dw1000_get_tx_fctrl_val(prf, preamble);
+        // [0x00:0x04] TX_FCTRL
+        struct dw1000_tx_fctrl_s tx_fctrl = dw1000_conf_tx_fctrl(config);
         dw1000_write(instance, DW1000_TRANSMIT_FRAME_CONTROL_FILE, 0, sizeof(tx_fctrl), &tx_fctrl);
+    }
+    // 0x09    1024  TX_BUFFER   not config
+    // 0x0A       5  DX_TIME     not config
+    // 0x0C       2  RX_FWTO     -
+    {
+        // [0x00:0x01] RX_FWTO
+        dw1000_write16(instance, 0x0C, 0, 0);
+    }
+    // 0x0D       4  SYS_CTRL    -
+    {
+        // [0x00:0x03] SYS_CTRL
+        dw1000_write32(instance, 0x0D, 0, 0);
+    }
+    // 0x0E       4  SYS_MASK    -
+    {
+        // [0x00:0x03] SYS_MASK
+        dw1000_write32(instance, 0x0E, 0, 0);
+    }
+    // 0x0F       5  SYS_STATUS  not config
+    // 0x10       4  RX_FINFO    not config
+    // 0x11    1024  RX_BUFFER   not config
+    // 0x12       8  RX_FQUAL    not config
+    // 0x13       4  RX_TTCKI    not config
+    // 0x14       5  RX_TTCKO    not config
+    // 0x15      14  RX_TIME     not config
+    // 0x17      10  TX_TIME     not config
+    // 0x18       2  TX_ANTD
+    {
+        // [0x00:0x01] TX_ANTD
+        dw1000_write16(instance, 0x18, 0, 21620);
+    }
+    // 0x19       5  SYS_STATE   not config
+    // 0x1A       4  ACK_RESP_T  -
+    {
+        // [0x00:0x03] ACK_RESP_T
+        dw1000_write32(instance, 0x1A, 0, 0);
+    }
+    // 0x1D       4  RX_SNIFF    -
+    {
+        // [0x00:0x03] RX_SNIFF
+        dw1000_write32(instance, 0x1D, 0, 0);
+    }
+    // 0x1E       4  TX_POWER    -
+    {
+        // [0x00:0x03] TX_POWER
+        dw1000_write32(instance, 0x1E, 0x00, dw1000_conf_tx_power(config));
+    }
+    // 0x1F       4  CHAN_CTRL   -
+    {
+        // [0x00:0x03] CHAN_CTRL
+        struct dw1000_chan_ctrl_s chan_ctrl = dw1000_conf_chan_ctrl(config);
+        dw1000_write(instance, 0x1F, 0x00, sizeof(chan_ctrl), &chan_ctrl);
+    }
+    // 0x21      41  USR_SFD     -
+    {
+        // [0x00] SFD_LENGTH
+        dw1000_write8(instance, 0x21, 0x00, dw1000_conf_sfd_length(config));
+        // [0x01:0x28] ignored due to TNSSFD/RNSSFD = 0 in CHAN_CTRL
+    }
+    // 0x23      32  AGC_CTRL    -
+    {
+        // [0x00:0x01] reserved
+        // [0x02:0x03] AGC_CTRL1
+        dw1000_write16(instance, 0x23, 0x02, 0);
+        // [0x04:0x05] AGC_TUNE1
+        dw1000_write16(instance, 0x23, 0x04, dw1000_conf_agc_tune1(config));
+        // [0x06:0x0B] reserved
+        // [0x0C:0x0F] AGC_TUNE2
+        dw1000_write32(instance, 0x23, 0x0C, 0x2502A907);
+        // [0x10:0x1D] reserved
+        // [0x1E:0x1F] AGC_TUNE3
+        dw1000_write16(instance, 0x23, 0x1E, 0x0035);
+    }
+    // 0x24      12  EXT_SYNC    -
+    {
+        // [0x00:0x03] EC_CTRL
+        dw1000_write32(instance, 0x24, 0x00, 0);
+        // [0x04:0x07] EC_RXTC read-only
+        // [0x08:0x0B] EC_GOLP read-only
+    }
+    // 0x25    4064  ACC_MEM     not config
+    // 0x26      44  GPIO_CTRL   TODO
+    // 0x27      44  DRX_CONF    -
+    {
+        // [0x00:0x01] reserved
+        // [0x02:0x03] DRX_TUNE0b
+        dw1000_write16(instance, 0x27, 0x02, dw1000_conf_drx_tune0b(config));
+        // [0x04:0x05] DRX_TUNE1a
+        dw1000_write16(instance, 0x27, 0x04, dw1000_conf_drx_tune1a(config));
+        // [0x06:0x07] DRX_TUNE1b
+        dw1000_write16(instance, 0x27, 0x06, dw1000_conf_drx_tune1b(config));
+        // [0x08:0x0B] DRX_TUNE2
+        dw1000_write32(instance, 0x27, 0x08, dw1000_conf_drx_tune2(config));
+        // [0x0C:0x1F] reserved
+        // [0x20:0x21] DRX_SFDTOC
+        dw1000_write16(instance, 0x27, 0x20, dw1000_conf_drx_sfdtoc(config));
+        // [0x22:0x23] reserved
+        // [0x24:0x25] DRX_PRETOC
+        dw1000_write16(instance, 0x27, 0x24, 0);
+        // [0x26:0x27] DRX_TUNE4H
+        dw1000_write16(instance, 0x27, 0x26, dw1000_conf_drx_tune4h(config));
+    }
+    // 0x28      58  RF_CONF     -
+    {
+        // [0x00:0x03] RF_CONF
+        dw1000_write32(instance, 0x28, 0x00, 0);
+        // [0x04:0x0A] reserved
+        // [0x0B] RF_RXCTRLH
+        dw1000_write8(instance, 0x28, 0x0B, dw1000_conf_rf_rxctrlh(config));
+        // [0x0C:0x0F] RF_TXCTRL
+        dw1000_write32(instance, 0x28, 0x0C, dw1000_conf_rf_txctrl(config));
+        // [0x10:0x1F] reserved
+        // [0x2C:0x2F] RF_STATUS
+        // [0x30:0x34] LDOTUNE NOTE: written by dw1000_load_ldotune
+    }
+    // 0x2A      52  TX_CAL      -
+    {
+        // [0x00:0x01] TC_SARC
+        // [0x03:0x06] TC_SARL
+        // [0x06:0x07] TC_SARW
+        // [0x08:0x0A] undocumented
+        // [0x0B] TC_PGDELAY
+        dw1000_write8(instance, 0x2A, 0x0B, dw1000_conf_tc_pgdelay(config));
+        // [0x0C] TC_PGTEST
+        dw1000_write8(instance, 0x2A, 0x0C, 0);
+    }
+    // 0x2B      21  FS_CTRL     -
+    {
+        // [0x00:0x06] reserved
+        // [0x07:0x0A] FS_PLLCFG
+        dw1000_write32(instance, 0x2B, 0x07, dw1000_conf_fs_pllcfg(config));
+        // [0x0B] FS_PLLTUNE
+        dw1000_write8(instance, 0x2B, 0x0B, dw1000_conf_fs_plltune(config));
+        // [0x0C:0x0D] reserved
+        // [0x0E] FS_XTALT
+        dw1000_write8(instance, 0x2B, 0x0E, 0x6F);
+    }
+    // 0x2C      12  AON         not config
+    // 0x2D      18  OTP_IF      not config
+    // 0x2E       -  LDE_IF      -
+    {
+        // [0x0000:0x0001] LDE_THRESH
+        // [0x0806] LDE_CFG1
+        dw1000_write8(instance, 0x2E, 0x0806, 0x0D);
+        // [0x1000:0x1001] LDE_PPINDX
+        // [0x1002:0x1003] LDE_PPAMPL
+        // [0x1804:0x1805] LDE_RXANTD
+        dw1000_write16(instance, 0x2E, 0x1804, 21620);
+        // [0x1806:0x1807] LDE_CFG2
+        dw1000_write16(instance, 0x2E, 0x1806, dw1000_conf_lde_cfg2(config));
+        // [0x2804:0x2805] LDE_REPC
+        dw1000_write16(instance, 0x2E, 0x2804, dw1000_conf_lde_repc(config));
+    }
+    // 0x2F      41  DIG_DIAG    not config
+    // 0x36      48  PMSC        -
+    {
+        // [0x00:0x03] PMSC_CTRL0
+        // [0x04:0x07] PMSC_CTRL1
+        // [0x08:0x0B] reserved
+        // [0x0C] PMSC_SNOZT
+        // [0x10:0x25] reserved
+        // [0x26:0x27] PMSC_TXFSEQ
+        // [0x28:0x2B] PMSC_LEDC
     }
 }
 
@@ -512,7 +362,7 @@ struct dw1000_rx_frame_info_s dw1000_receive(struct dw1000_instance_s* instance,
     return ret;
 }
 
-void dw1000_transmit(struct dw1000_instance_s* instance, uint32_t buf_len, void* buf) {
+void dw1000_transmit(struct dw1000_instance_s* instance, uint32_t buf_len, void* buf, bool expect_response) {
     if (!instance) {
         return;
     }
@@ -525,22 +375,81 @@ void dw1000_transmit(struct dw1000_instance_s* instance, uint32_t buf_len, void*
     dw1000_write(instance, DW1000_TRANSMIT_DATA_BUFFER_FILE, 0, buf_len, buf);
 
     // Configure tx parameters
-    struct dw1000_tx_fctrl_s tx_fctrl;
-    dw1000_read(instance, DW1000_TRANSMIT_FRAME_CONTROL_FILE, 0, sizeof(tx_fctrl), &tx_fctrl);
-    tx_fctrl.reserved = 0;
-    tx_fctrl.TFLEN = buf_len+2;
-    dw1000_write(instance, DW1000_TRANSMIT_FRAME_CONTROL_FILE, 0, sizeof(tx_fctrl), &tx_fctrl);
-
-    // Start tx
-    uint32_t sys_ctrl = 1<<1;
-    dw1000_write(instance, DW1000_SYSTEM_CONTROL_REGISTER_FILE, 0, sizeof(sys_ctrl), &sys_ctrl);
-}
-
-void dw1000_handle_interrupt(struct dw1000_instance_s* instance) {
-    if (!instance) {
-        return;
+    {
+        struct dw1000_tx_fctrl_s tx_fctrl;
+        dw1000_read(instance, DW1000_TRANSMIT_FRAME_CONTROL_FILE, 0, sizeof(tx_fctrl), &tx_fctrl);
+        tx_fctrl.reserved = 0;
+        tx_fctrl.TFLEN = buf_len+2;
+        dw1000_write(instance, DW1000_TRANSMIT_FRAME_CONTROL_FILE, 0, sizeof(tx_fctrl), &tx_fctrl);
     }
 
+    // Start tx
+    {
+        struct dw1000_sys_ctrl_s sys_ctrl;
+        memset(&sys_ctrl, 0, sizeof(sys_ctrl));
+        sys_ctrl.TXSTRT = 1;
+        if (expect_response) {
+            sys_ctrl.WAIT4RESP = 1;
+        }
+        dw1000_write(instance, DW1000_SYSTEM_CONTROL_REGISTER_FILE, 0, sizeof(sys_ctrl), &sys_ctrl);
+    }
+}
+
+bool dw1000_scheduled_transmit(struct dw1000_instance_s* instance, uint64_t transmit_time, uint32_t buf_len, void* buf, bool expect_response) {
+    if (!instance) {
+        return false;
+    }
+
+    if (buf_len > 125) {
+        return false;
+    }
+
+    // Write tx data to data buffer
+    dw1000_write(instance, DW1000_TRANSMIT_DATA_BUFFER_FILE, 0, buf_len, buf);
+
+    // Configure tx parameters
+    {
+        struct dw1000_tx_fctrl_s tx_fctrl;
+        dw1000_read(instance, DW1000_TRANSMIT_FRAME_CONTROL_FILE, 0, sizeof(tx_fctrl), &tx_fctrl);
+        tx_fctrl.reserved = 0;
+        tx_fctrl.TFLEN = buf_len+2;
+        dw1000_write(instance, DW1000_TRANSMIT_FRAME_CONTROL_FILE, 0, sizeof(tx_fctrl), &tx_fctrl);
+    }
+
+    // Write transmission time
+    dw1000_write(instance, 0x0A, 0, 5, &transmit_time);
+
+    // Schedule tx
+    {
+        struct dw1000_sys_ctrl_s sys_ctrl;
+        memset(&sys_ctrl, 0, sizeof(sys_ctrl));
+        sys_ctrl.TXSTRT = 1;
+        sys_ctrl.TXDLYS = 1;
+        if (expect_response) {
+            sys_ctrl.WAIT4RESP = 1;
+        }
+        dw1000_write(instance, DW1000_SYSTEM_CONTROL_REGISTER_FILE, 0, sizeof(sys_ctrl), &sys_ctrl);
+    }
+
+    // Check for HPDWARN
+    {
+        struct dw1000_sys_status_s sys_status;
+        dw1000_read(instance, DW1000_SYSTEM_EVENT_STATUS_REGISTER_FILE, 0, sizeof(sys_status), &sys_status);
+        if (sys_status.HPDWARN) {
+            dw1000_disable_transceiver(instance);
+            if (expect_response) {
+                dw1000_rx_enable(instance);
+            }
+            return false;
+        }
+    }
+    return true;
+}
+
+uint64_t dw1000_get_tx_stamp(struct dw1000_instance_s* instance) {
+    uint64_t ret = 0;
+    dw1000_read(instance, 0x17, 0, 5, &ret);
+    return ret;
 }
 
 static void dw1000_clock_force_sys_xti(struct dw1000_instance_s* instance) {
@@ -653,7 +562,7 @@ static void dw1000_clear_double_buffered_status_bits(struct dw1000_instance_s* i
     dw1000_clear_double_buffered_status_bits_and_optionally_disable_transceiver(instance, false);
 }
 
-static void dw1000_disable_transceiver(struct dw1000_instance_s* instance) {
+void dw1000_disable_transceiver(struct dw1000_instance_s* instance) {
     dw1000_clear_double_buffered_status_bits_and_optionally_disable_transceiver(instance, true);
 }
 
