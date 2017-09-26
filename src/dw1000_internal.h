@@ -11,16 +11,29 @@
 #define DW1000_OTP_MEMORY_INTERFACE_FILE 0x2D
 #define DW1000_POWER_MANAGEMENT_AND_SYSTEM_CONTROL_FILE 0x36
 
-enum dw1000_clock_setting_t {
-    DW1000_CLOCK_SETTING_FORCE_SYS_XTI=0,
-    DW1000_CLOCK_SETTING_ENABLE_ALL_SEQ,
-    DW1000_CLOCK_SETTING_FORCE_SYS_PLL,
-    DW1000_CLOCK_SETTING_READ_ACC_ON,
-    DW1000_CLOCK_SETTING_READ_ACC_OFF,
-    DW1000_CLOCK_SETTING_FORCE_OTP_ON,
-    DW1000_CLOCK_SETTING_FORCE_OTP_OFF,
-    DW1000_CLOCK_SETTING_FORCE_TX_PLL,
-    DW1000_CLOCK_SETTING_FORCE_LDE
+enum dw1000_prf_t {
+    DW1000_PRF_16MHZ,
+    DW1000_PRF_64MHZ
+};
+
+enum dw1000_preamble_t {
+    DW1000_PREAMBLE_64,
+    DW1000_PREAMBLE_128,
+    DW1000_PREAMBLE_256,
+    DW1000_PREAMBLE_512,
+    DW1000_PREAMBLE_1024,
+    DW1000_PREAMBLE_1536,
+    DW1000_PREAMBLE_2048,
+    DW1000_PREAMBLE_4096
+};
+
+enum dw1000_channel_t {
+    DW1000_CHANNEL_1 = 1,
+    DW1000_CHANNEL_2 = 2,
+    DW1000_CHANNEL_3 = 3,
+    DW1000_CHANNEL_4 = 4,
+    DW1000_CHANNEL_5 = 5,
+    DW1000_CHANNEL_7 = 7
 };
 
 struct __attribute__((packed)) dw1000_rx_finfo_s {
@@ -192,5 +205,19 @@ struct __attribute__((packed)) dw1000_tx_fctrl_s {
     };
     struct { // register 08:04
         uint8_t IFSDELAY:8;            // [0:7]
+    };
+};
+
+struct __attribute__((packed)) dw1000_chan_ctrl_s {
+    struct { // register 1F:00
+        uint32_t TX_CHAN:4;            // [0:3]
+        uint32_t RX_CHAN:4;            // [4:7]
+        uint32_t reserved:9;           // [8:16]
+        uint32_t DWSFD:1;              // [17]
+        uint32_t RXPRF:2;              // [18:19]
+        uint32_t TNSSFD:1;             // [20]
+        uint32_t RNSSFD:1;             // [21]
+        uint32_t TX_PCODE:5;           // [22:26]
+        uint32_t RX_PCODE:5;           // [27:31]
     };
 };
