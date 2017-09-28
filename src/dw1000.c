@@ -69,6 +69,7 @@ void dw1000_init(struct dw1000_instance_s* instance, uint8_t spi_idx, uint32_t s
     // DW1000 User Manual Section 2.5.5.11
     dw1000_load_ldotune(instance);
 
+    // Switch back to normal clock
     dw1000_clock_enable_all_seq(instance);
 
     dw1000_config(instance);

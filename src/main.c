@@ -27,6 +27,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
+#include <common/param.h>
 
 #define CANBUS_AUTOBAUD_SWITCH_INTERVAL_US 1000000
 #define CANBUS_AUTOBAUD_TIMEOUT_US 10000000
@@ -193,7 +194,7 @@ static void ss_twr_initiator_run(void) {
 
             while(true) {
                 if (micros()-tnow_us > 5000) {
-                    uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "init rx t/o", "");
+//                     uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "init rx t/o", "");
                     dw1000_disable_transceiver(&uwb_instance);
                     break;
                 }
@@ -209,7 +210,7 @@ static void ss_twr_initiator_run(void) {
                     double clksca = (double)rx_info.rx_ttcko/(double)rx_info.rx_ttcki;
                     double tprop = 0.5*(tround-treply);
                     sprintf(msg, "%f %f", tprop, clksca);
-                    uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "init rx", msg);
+//                     uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "init rx", msg);
                     break;
                 }
             }
@@ -291,6 +292,9 @@ static void transmitter_run(void) {
     }
 }
 
+PARAM_DECLARE_FLOAT32_PARAM(pi, "pi", 4, 3, 5)
+PARAM_DECLARE_FLOAT32_PARAM(seven, "param_7", 7, 7, 7)
+
 int main(void) {
     halInit();
     chSysInit();
@@ -300,6 +304,8 @@ int main(void) {
     shared_msg_clear();
 
     begin_canbus_autobaud();
+
+//     param_print_table();
 
     uint8_t unique_id[12];
     board_get_unique_id(unique_id, sizeof(unique_id));
