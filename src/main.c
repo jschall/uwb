@@ -310,11 +310,11 @@ int main(void) {
     uint8_t unique_id[12];
     board_get_unique_id(unique_id, sizeof(unique_id));
 
-    if (unique_id[10] == 0x1F) {
-        ss_twr_initiator_run();
-    } else {
-        ss_twr_responder_run();
-    }
+//     if (unique_id[10] == 0x1F) {
+//         ss_twr_initiator_run();
+//     } else {
+//         ss_twr_responder_run();
+//     }
 
     return 0;
 }
