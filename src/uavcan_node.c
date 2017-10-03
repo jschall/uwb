@@ -5,6 +5,7 @@
 #include <common/shared_boot_msg.h>
 #include <common/timing.h>
 #include <common/helpers.h>
+#include <common/param.h>
 #include <string.h>
 
 #include <ch.h>
@@ -19,12 +20,14 @@ static bool shared_msg_valid;
 static void begin_canbus_autobaud(void);
 static void update_canbus_autobaud(void);
 
-static THD_WORKING_AREA(uavcanNodeThread_wa, 1024);
+static THD_WORKING_AREA(uavcanNodeThread_wa, 2048);
 static THD_FUNCTION(UavcanNodeThread, arg) {
     (void)arg;
 
     shared_msg_valid = shared_msg_check_and_retreive(&shared_msgid, &shared_msg);
     shared_msg_clear();
+
+    param_init();
 
     begin_canbus_autobaud();
     while(true) {
@@ -38,6 +41,55 @@ static THD_FUNCTION(UavcanNodeThread, arg) {
 
 void uavcan_node_init(void) {
     chThdCreateStatic(uavcanNodeThread_wa, sizeof(uavcanNodeThread_wa), NORMALPRIO, UavcanNodeThread, NULL);
+}
+
+static void uavcan_node_send_param_getset_response(struct uavcan_transfer_info_s* transfer_info, uint16_t param_idx) {
+    struct uavcan_param_getset_response_s response;
+    param_make_uavcan_getset_response(param_idx, &response);
+    uavcan_send_param_getset_response(transfer_info, &response);
+}
+
+static void uavcan_node_param_getset_request_handler(struct uavcan_transfer_info_s transfer_info, struct uavcan_param_getset_request_s* request) {
+    param_acquire();
+
+    int16_t param_idx = request->index;
+    if (request->name_len > 0) {
+        // If the name field is not empty, we are to prefer it over the param index field
+        param_idx = param_get_index_by_name(request->name_len, request->name); // TODO implement param_get_index_by_name
+    }
+
+    if (param_idx >= 0 && param_idx < param_get_num_params_registered()) { // TODO implement param_get_num_params_registered
+        // Param exists
+        switch(request->value.type) {
+            case UAVCAN_PARAM_VALUE_TYPE_EMPTY: {
+                // get request
+                uavcan_node_send_param_getset_response(&transfer_info, param_idx);
+                break;
+            }
+            case UAVCAN_PARAM_VALUE_TYPE_INT64: {
+                // set request: int64
+
+                break;
+            }
+            case UAVCAN_PARAM_VALUE_TYPE_FLOAT32: {
+                // set request: float
+
+                break;
+            }
+            case UAVCAN_PARAM_VALUE_TYPE_BOOL: {
+                // set request: bool
+
+                break;
+            }
+            case UAVCAN_PARAM_VALUE_TYPE_STRING: {
+                // set request: string
+
+                break;
+            }
+        }
+    }
+
+    param_release();
 }
 
 static void fill_shared_canbus_info(struct shared_canbus_info_s* canbus_info) {
@@ -172,6 +224,7 @@ static void on_canbus_baudrate_confirmed(uint32_t canbus_baud) {
     uavcan_set_uavcan_ready_cb(uavcan_ready_handler);
     uavcan_set_restart_cb(restart_request_handler);
     uavcan_set_file_beginfirmwareupdate_cb(file_beginfirmwareupdate_handler);
+    uavcan_set_param_getset_request_cb(uavcan_node_param_getset_request_handler);
     uavcan_set_node_mode(UAVCAN_MODE_OPERATIONAL);
 
     if (shared_msg_valid && shared_msg.canbus_info.local_node_id > 0 && shared_msg.canbus_info.local_node_id <= 127) {
