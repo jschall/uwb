@@ -24,6 +24,7 @@
 #include <math.h>
 #include <common/param.h>
 #include <common/uavcan.h>
+#include "uavcan_node.h"
 
 static void ss_twr_initiator_run(void) {
     struct dw1000_instance_s uwb_instance;

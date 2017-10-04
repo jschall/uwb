@@ -92,6 +92,27 @@ static void uavcan_node_param_getset_request_handler(struct uavcan_transfer_info
     param_release();
 }
 
+static void uavcan_node_send_param_executeopcode_response(struct uavcan_transfer_info_s* transfer_info, bool ok) {
+    struct uavcan_param_executeopcode_response_s response = {0,ok};
+    uavcan_send_param_executeopcode_response(transfer_info, &response);
+}
+
+static void uavcan_node_param_executeopcode_request_handler(struct uavcan_transfer_info_s transfer_info, struct uavcan_param_executeopcode_request_s* request) {
+    param_acquire();
+    bool success = false;
+    switch (request->opcode) {
+        case UAVCAN_PARAM_EXECUTEOPCODE_OPCODE_SAVE:
+            success = param_store_all();
+            break;
+        case UAVCAN_PARAM_EXECUTEOPCODE_OPCODE_ERASE:
+            success = param_erase();
+            break;
+    }
+    param_release();
+
+    uavcan_node_send_param_executeopcode_response(&transfer_info, success);
+}
+
 static void fill_shared_canbus_info(struct shared_canbus_info_s* canbus_info) {
     canbus_info->local_node_id = uavcan_get_node_id();
 
@@ -225,6 +246,7 @@ static void on_canbus_baudrate_confirmed(uint32_t canbus_baud) {
     uavcan_set_restart_cb(restart_request_handler);
     uavcan_set_file_beginfirmwareupdate_cb(file_beginfirmwareupdate_handler);
     uavcan_set_param_getset_request_cb(uavcan_node_param_getset_request_handler);
+    uavcan_set_param_executeopcode_request_cb(uavcan_node_param_executeopcode_request_handler);
     uavcan_set_node_mode(UAVCAN_MODE_OPERATIONAL);
 
     if (shared_msg_valid && shared_msg.canbus_info.local_node_id > 0 && shared_msg.canbus_info.local_node_id <= 127) {
