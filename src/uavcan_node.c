@@ -55,10 +55,10 @@ static void uavcan_node_param_getset_request_handler(struct uavcan_transfer_info
     int16_t param_idx = request->index;
     if (request->name_len > 0) {
         // If the name field is not empty, we are to prefer it over the param index field
-        param_idx = param_get_index_by_name(request->name_len, request->name); // TODO implement param_get_index_by_name
+        param_idx = param_get_index_by_name(request->name_len, (char*)request->name);
     }
 
-    if (param_idx >= 0 && param_idx < param_get_num_params_registered()) { // TODO implement param_get_num_params_registered
+    if (param_idx >= 0 && param_idx < param_get_num_params_registered()) {
         // Param exists
         switch(request->value.type) {
             case UAVCAN_PARAM_VALUE_TYPE_EMPTY: {
@@ -68,22 +68,22 @@ static void uavcan_node_param_getset_request_handler(struct uavcan_transfer_info
             }
             case UAVCAN_PARAM_VALUE_TYPE_INT64: {
                 // set request: int64
-
+                param_set_by_index_integer(param_idx, request->value.integer_value);
                 break;
             }
             case UAVCAN_PARAM_VALUE_TYPE_FLOAT32: {
                 // set request: float
-
+                param_set_by_index_float32(param_idx, request->value.real_value);
                 break;
             }
             case UAVCAN_PARAM_VALUE_TYPE_BOOL: {
                 // set request: bool
-
+                param_set_by_index_bool(param_idx, request->value.boolean_value);
                 break;
             }
             case UAVCAN_PARAM_VALUE_TYPE_STRING: {
                 // set request: string
-
+                param_set_by_index_string(param_idx, request->value.string_value_len, (char*)request->value.string_value);
                 break;
             }
         }
