@@ -46,7 +46,9 @@ void uavcan_node_init(void) {
 static void uavcan_node_send_param_getset_response(struct uavcan_transfer_info_s* transfer_info, uint16_t param_idx) {
     struct uavcan_param_getset_response_s response;
     param_make_uavcan_getset_response(param_idx, &response);
+    uavcan_acquire();
     uavcan_send_param_getset_response(transfer_info, &response);
+    uavcan_release();
 }
 
 static void uavcan_node_param_getset_request_handler(struct uavcan_transfer_info_s transfer_info, struct uavcan_param_getset_request_s* request) {
@@ -69,21 +71,25 @@ static void uavcan_node_param_getset_request_handler(struct uavcan_transfer_info
             case UAVCAN_PARAM_VALUE_TYPE_INT64: {
                 // set request: int64
                 param_set_by_index_integer(param_idx, request->value.integer_value);
+                uavcan_node_send_param_getset_response(&transfer_info, param_idx);
                 break;
             }
             case UAVCAN_PARAM_VALUE_TYPE_FLOAT32: {
                 // set request: float
                 param_set_by_index_float32(param_idx, request->value.real_value);
+                uavcan_node_send_param_getset_response(&transfer_info, param_idx);
                 break;
             }
             case UAVCAN_PARAM_VALUE_TYPE_BOOL: {
                 // set request: bool
                 param_set_by_index_bool(param_idx, request->value.boolean_value);
+                uavcan_node_send_param_getset_response(&transfer_info, param_idx);
                 break;
             }
             case UAVCAN_PARAM_VALUE_TYPE_STRING: {
                 // set request: string
                 param_set_by_index_string(param_idx, request->value.string_value_len, (char*)request->value.string_value);
+                uavcan_node_send_param_getset_response(&transfer_info, param_idx);
                 break;
             }
         }
@@ -94,7 +100,9 @@ static void uavcan_node_param_getset_request_handler(struct uavcan_transfer_info
 
 static void uavcan_node_send_param_executeopcode_response(struct uavcan_transfer_info_s* transfer_info, bool ok) {
     struct uavcan_param_executeopcode_response_s response = {0,ok};
+    uavcan_acquire();
     uavcan_send_param_executeopcode_response(transfer_info, &response);
+    uavcan_release();
 }
 
 static void uavcan_node_param_executeopcode_request_handler(struct uavcan_transfer_info_s transfer_info, struct uavcan_param_executeopcode_request_s* request) {
