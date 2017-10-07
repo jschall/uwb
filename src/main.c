@@ -153,12 +153,7 @@ PARAM_DEFINE_UINT8_PARAM_STATIC(param_h, "h", 7, 7, 7)
 PARAM_DEFINE_STRING_PARAM_STATIC(param_j, "j", "blah", 128)
 PARAM_DEFINE_BOOL_PARAM_STATIC(param_i, "i", true)
 
-
 int main(void) {
-    halInit();
-    chSysInit();
-    timing_init();
-
     uavcan_node_init();
 
     while(true) {
