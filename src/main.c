@@ -153,11 +153,16 @@ PARAM_DEFINE_UINT8_PARAM_STATIC(param_h, "h", 7, 7, 7)
 PARAM_DEFINE_STRING_PARAM_STATIC(param_j, "j", "blah", 128)
 PARAM_DEFINE_BOOL_PARAM_STATIC(param_i, "i", true)
 
+#include <omd_uavcan/omd_uavcan.h>
+
+static struct omd_uavcan_instance_s omd_uavcan_instance;
 int main(void) {
-    uavcan_node_init();
+    omd_uavcan_init(&omd_uavcan_instance, &CAND1);
+
+//     uavcan_node_init();
 
     while(true) {
-        chThdSleepMicroseconds(1000);
+        chThdSleepSeconds(1);
     }
 
 //     param_print_table();
