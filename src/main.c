@@ -154,16 +154,64 @@ PARAM_DEFINE_STRING_PARAM_STATIC(param_j, "j", "blah", 128)
 PARAM_DEFINE_BOOL_PARAM_STATIC(param_i, "i", true)
 
 #include <omd_uavcan/omd_uavcan.h>
+#include <uavcan.protocol.NodeStatus.h>
 
-static struct omd_uavcan_instance_s omd_uavcan_instance;
+static uint32_t encode_nodestatus(void* in, void* out) {
+    return encode_uavcan_protocol_NodeStatus(out, in);
+}
+
+static struct omd_uavcan_message_descriptor_s uavcan_protocol_NodeStatus_descriptor = {
+    UAVCAN_PROTOCOL_NODESTATUS_DT_SIG,
+    UAVCAN_PROTOCOL_NODESTATUS_DT_ID,
+    CanardTransferTypeBroadcast,
+    sizeof(struct uavcan_protocol_NodeStatus_s),
+    UAVCAN_PROTOCOL_NODESTATUS_MAX_PACK_SIZE,
+    encode_nodestatus,
+    decode_uavcan_protocol_NodeStatus
+};
+
+static void nodestatus_handler(struct omd_uavcan_deserialized_message_s* msg_wrapper, void* ctx) {
+    struct uavcan_protocol_NodeStatus_s* msg = (struct uavcan_protocol_NodeStatus_s*)msg_wrapper->msg;
+
+    chSysHalt("oh shit, i don't know what to do");
+}
+
+RUN_BEFORE(OMD_UAVCAN_INIT) {
+    const CANConfig cancfg = {
+        CAN_MCR_ABOM | CAN_MCR_AWUM | CAN_MCR_TXFP,
+        CAN_BTR_SJW(0) | CAN_BTR_TS2(2-1) |
+        CAN_BTR_TS1(15-1) | CAN_BTR_BRP((STM32_PCLK1/18)/1000000 - 1)
+    };
+
+    canStart(&CAND1, &cancfg);
+}
+
 int main(void) {
-    omd_uavcan_init(&omd_uavcan_instance, &CAND1);
+    omd_uavcan_set_node_id(0, 42);
 
-//     uavcan_node_init();
+    struct uavcan_protocol_NodeStatus_s msg;
+    msg.uptime_sec = 0;
+    msg.health = UAVCAN_PROTOCOL_NODESTATUS_HEALTH_OK;
+    msg.mode = UAVCAN_PROTOCOL_NODESTATUS_MODE_OPERATIONAL;
+    msg.sub_mode = 0;
+    msg.vendor_specific_status_code = 0;
 
     while(true) {
-        chThdSleepSeconds(1);
+        msg.uptime_sec++;
+        omd_uavcan_broadcast(0, &uavcan_protocol_NodeStatus_descriptor, CANARD_TRANSFER_PRIORITY_LOW, &msg);
+        chThdSleepMilliseconds(1000);
     }
+
+//     struct pubsub_listener_s nodestatus_listener;
+//     struct pubsub_listener_s param_getset_req_listener;
+//
+//     omd_uavcan_subscribe(&nodestatus_listener, &uavcan_protocol_NodeStatus_descriptor, nodestatus_handler, NULL);
+//     omd_uavcan_subscribe(&param_getset_req_listener, &uavcan_protocol_param_GetSet_req_descriptor, );
+//
+//     const struct pubsub_listener_s** listener_list = {&nodestatus_listener, &param_getset_req_listener};
+//     pubsub_multiple_listener_handle_until_timeout(sizeof(listener_list)/sizeof(listener_list[0]), listener_list, TIME_INFINITE);
+
+//     uavcan_node_init();
 
 //     param_print_table();
 
