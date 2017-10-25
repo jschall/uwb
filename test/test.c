@@ -26,24 +26,24 @@
 #include <common/uavcan.h>
 #include "uavcan_node.h"
 
-static void twr_tdma_allocator_run(void) {
+static void ss_twr_initiator_run(void) {
     struct dw1000_instance_s uwb_instance;
     dw1000_init(&uwb_instance, 3, BOARD_PAL_LINE_SPI3_UWB_CS, BOARD_PAL_LINE_UWB_NRST);
     uint32_t tprev_us = 0;
     uint8_t i=0;
     while (true) {
         uint32_t tnow_us = micros();
-        if (tnow_us - tprev_us > 200000) {
+        if (tnow_us-tprev_us > 200000) {
             uavcan_acquire();
             tprev_us = tnow_us;
             char msg[50];
-            int n = sprintf(msg, "%u", i);
+            int n = sprintf(msg, "message %u", i);
             dw1000_transmit(&uwb_instance, n, msg, true);
-            uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "init tx", msg);
+//             uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "init tx", msg);
 
             while(true) {
                 if (micros()-tnow_us > 5000) {
-                    uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "init rx t/o", "");
+//                     uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "init rx t/o", "");
                     dw1000_disable_transceiver(&uwb_instance);
                     break;
                 }
@@ -59,7 +59,7 @@ static void twr_tdma_allocator_run(void) {
                     double clksca = (double)rx_info.rx_ttcko/(double)rx_info.rx_ttcki;
                     double tprop = 0.5*(tround-treply);
                     sprintf(msg, "%f %f", tprop, clksca);
-                    uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "init rx", msg);
+//                     uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "init rx", msg);
                     break;
                 }
             }
@@ -71,7 +71,7 @@ static void twr_tdma_allocator_run(void) {
     }
 }
 
-static void twr_tdma_allocatee_run(void) {
+static void ss_twr_responder_run(void) {
     struct dw1000_instance_s uwb_instance;
     dw1000_init(&uwb_instance, 3, BOARD_PAL_LINE_SPI3_UWB_CS, BOARD_PAL_LINE_UWB_NRST);
     dw1000_rx_enable(&uwb_instance);
@@ -86,7 +86,7 @@ static void twr_tdma_allocatee_run(void) {
             uint32_t dly = (uint32_t)(scheduled_time-rx_info.timestamp);
             if (dw1000_scheduled_transmit(&uwb_instance, scheduled_time, sizeof(dly), &dly, true)) {
                 rxbuf[rx_info.len] = 0;
-                uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "resp", rxbuf);
+//                 uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "resp", rxbuf);
             } else {
                 uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "resp fail", "");
             }
@@ -95,6 +95,52 @@ static void twr_tdma_allocatee_run(void) {
     }
 }
 
+static void receiver_run(void) {
+    struct dw1000_instance_s uwb_instance;
+    dw1000_init(&uwb_instance, 3, BOARD_PAL_LINE_SPI3_UWB_CS, BOARD_PAL_LINE_UWB_NRST);
+    dw1000_rx_enable(&uwb_instance);
+    uint32_t tprev_us = 0;
+    while (true) {
+        uint32_t tnow_us = micros();
+        if (tnow_us-tprev_us > 100000) {
+            tprev_us = tnow_us;
+            char rxbuf[50];
+            struct dw1000_rx_frame_info_s rx_info = dw1000_receive(&uwb_instance, sizeof(rxbuf)-1, rxbuf);
+            if (rx_info.err_code == DW1000_RX_ERROR_NONE) {
+                rxbuf[rx_info.len] = 0;
+                char msg[100];
+                sprintf(msg, "%llu %e %s", rx_info.timestamp, ((float)rx_info.rx_ttcko)/((float)rx_info.rx_ttcki), rxbuf);
+                uavcan_acquire();
+                uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "rx", msg);
+                uavcan_release();
+            }
+        }
+        chThdSleepMicroseconds(1000);
+    }
+}
+
+static void transmitter_run(void) {
+    struct dw1000_instance_s uwb_instance;
+    dw1000_init(&uwb_instance, 3, BOARD_PAL_LINE_SPI3_UWB_CS, BOARD_PAL_LINE_UWB_NRST);
+    uint32_t tprev_us = 0;
+    uint8_t i=0;
+    while (true) {
+        uint32_t tnow_us = micros();
+        if (tnow_us-tprev_us > 200000) {
+            tprev_us = tnow_us;
+            char msg[50];
+            int n = snprintf(msg, sizeof(msg), "message %u", i);
+            if (n > 0 && n<sizeof(msg)) {
+                dw1000_transmit(&uwb_instance, n, msg, false);
+                uavcan_acquire();
+                uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "tx", msg);
+                uavcan_release();
+            }
+            i++;
+        }
+        chThdSleepMicroseconds(1000);
+    }
+}
 
 PARAM_DEFINE_FLOAT32_PARAM_STATIC(param_a, "a", 4, 3, 5)
 PARAM_DEFINE_INT64_PARAM_STATIC(param_b, "b", 7, 7, 7)
@@ -115,15 +161,20 @@ int main(void) {
 
     uavcan_node_init();
 
-
-    uint8_t unique_id[12];
-    board_get_unique_id(unique_id, sizeof(unique_id));
-    tdma_init(unique_id[10]);
-    if (unique_id[10] == 0x4A) { // we are tdma supervisor
-        tdma_supervisor_run();
-    } else {
-        tdma_subordinate_run();
+    while(true) {
+        chThdSleepMicroseconds(1000);
     }
+
+//     param_print_table();
+
+//     uint8_t unique_id[12];
+//     board_get_unique_id(unique_id, sizeof(unique_id));
+
+//     if (unique_id[10] == 0x1F) {
+//         ss_twr_initiator_run();
+//     } else {
+//         ss_twr_responder_run();
+//     }
 
     return 0;
 }
