@@ -14,13 +14,14 @@
 #define MAX_DATA_SIZE 127
 #define MAX_HEADER_SIZE 93
 #define TX_RATE 6800000
+#define ARB_TIME ((SLOT_SIZE/3) + (SLOT_SIZE/10))
 
-#define SLOT_SIZE 1000ULL    //1ms
+#define SLOT_SIZE 2000ULL    //2ms
 #define TOTAL_AVAILABLE_SLOTS 127
 
 
-#define SLOT_SIZE_TICKS 63897.6f
-#define DW1000_SID2ST(x) ((uint64_t)(x*(SLOT_SIZE_TICKS*SLOT_SIZE)))
+#define UWB_SYS_TICKS 63897.6f
+#define DW1000_SID2ST(x) ((uint64_t)(((x)*(UWB_SYS_TICKS*SLOT_SIZE)) + (UWB_SYS_TICKS*ARB_TIME)))
 
 uint8_t slot_id_list[127];
 
