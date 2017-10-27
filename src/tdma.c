@@ -14,6 +14,7 @@ static float prev_rx_tstamp;
     Initialize TDMA vars
 
 */
+#define DEBUG_PRINT  1
 
 void tdma_init(uint8_t unique_id)
 {
@@ -43,7 +44,7 @@ void print_info(struct message_spec_s msg, struct dw1000_rx_frame_info_s rx_info
     if(!send_log_now) {
         return;
     }
-    print_tdma_spec();
+    //print_tdma_spec();
     sprintf(print_dat,"T: %f SLOT: %d NID: %x PKT_CNT: %d TX_SLOT: %d TNID: %d", \
         rx_info.timestamp/UWB_SYS_TICKS, curr_slot, msg.tx_spec.node_id, msg.tx_spec.pkt_cnt , \
         msg.tx_spec.data_slot_id, msg.target_node_id);
@@ -84,11 +85,13 @@ static void handle_request_slot()
             if(slot_id_list[i] == msg.tx_spec.node_id) {
                 tdma_spec.req_node_id = msg.tx_spec.node_id;
                 tdma_spec.res_data_slot = i + 1;
+#ifdef DEBUG_PRINT
                 uavcan_acquire();
                 sprintf(print_dat,"Repeat Slot: NID:%x TX_TSTAMP: %f PREV_MSG: %f THIS_MSG:%f", \
                     msg.tx_spec.node_id, dw1000_get_tx_stamp(&uwb_instance)/UWB_SYS_TICKS, prev_rx_tstamp, rx_info.timestamp/UWB_SYS_TICKS);
                 uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "Super: ", print_dat);
                 uavcan_release();
+#endif
                 return;
             }
         }
@@ -116,6 +119,7 @@ static void update_data_slot(bool supervisor)
     if (rx_info.err_code == DW1000_RX_ERROR_NONE) {
         prev_rx_tstamp = rx_info.timestamp/UWB_SYS_TICKS;
         print_info(msg, rx_info);
+#ifdef DEBUG_PRINT
         if(msg.target_node_id == 128) {
             uavcan_acquire();
             sprintf(print_dat,"Wrong Request: NID:%x TX_TSTAMP: %f PREV_MSG: %f THIS_MSG:%f", \
@@ -123,6 +127,7 @@ static void update_data_slot(bool supervisor)
             uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "Super: ", print_dat);
             uavcan_release();
         }
+#endif
     }
 
     dw1000_rx_enable(&uwb_instance);
@@ -198,14 +203,18 @@ static void req_data_slot(struct dw1000_rx_frame_info_s rx_info)
 
     dw1000_disable_transceiver(&uwb_instance);
     if(dw1000_scheduled_transmit(&uwb_instance, scheduled_time, sizeof(msg), &msg, false)) {
+#ifdef DEBUG_PRINT
         uavcan_acquire();
         sprintf(print_dat, "Requesting Data Slot @ %d for %x", tdma_spec.num_tx_online+1, tx_spec.node_id);
         uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "Sub: ", print_dat);
         uavcan_release();
+#endif
     } else {
+#ifdef DEBUG_PRINT
         uavcan_acquire();
         uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "Sub: ", "Requesting Data Slot Failed");
         uavcan_release();
+#endif
     }
     //Go and wait for time slot allocation
     dw1000_rx_enable(&uwb_instance);
