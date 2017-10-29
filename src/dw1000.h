@@ -75,3 +75,4 @@ void dw1000_disable_transceiver(struct dw1000_instance_s* instance);
 void dw1000_handle_interrupt(struct dw1000_instance_s* instance);
 
 uint64_t dw1000_get_tx_stamp(struct dw1000_instance_s* instance);
+uint64_t dw1000_get_sys_time(struct dw1000_instance_s* instance);
