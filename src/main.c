@@ -25,6 +25,7 @@
 #include <common/param.h>
 #include <common/uavcan.h>
 #include "uavcan_node.h"
+#include "tdma.h"
 
 
 /*
@@ -50,13 +51,15 @@ int main(void) {
 
     uint8_t unique_id[12];
     board_get_unique_id(unique_id, sizeof(unique_id));
-    tdma_init(unique_id[10]);
     if (unique_id[10] == 0x4A) { // we are tdma supervisor
+        tdma_init(unique_id[10], TDMA_SUPERVISOR);
         tdma_supervisor_run();
         tdma_unit_type = 1;
     } else if (tdma_unit_type == 0){
+        tdma_init(unique_id[10], TDMA_SUBORDINATE);
         tdma_subordinate_run();
     } else {
+        tdma_init(unique_id[10], TDMA_SNIFFER);
         tdma_sniffer_run();
     }
 

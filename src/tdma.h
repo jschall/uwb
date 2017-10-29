@@ -40,6 +40,12 @@ enum tx_types {
     STATIC_TAG
 };
 
+enum tdma_types {
+    TDMA_SUPERVISOR,
+    TDMA_SUBORDINATE,
+    TDMA_SNIFFER
+};
+
 struct tdma_spec_s {
     uint32_t slot_size;
     uint32_t num_tx_online;
@@ -63,7 +69,7 @@ struct message_spec_s {
 };
 
 
-void tdma_init(uint8_t unique_id);
+void tdma_init(uint8_t unique_id, uint8_t unit_type);
 void tdma_supervisor_run();
 void tdma_subordinate_run();
 void tdma_sniffer_run();

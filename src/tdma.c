@@ -7,10 +7,10 @@ static uint8_t curr_slot;
 static bool data_slot_allocated;
 static struct tx_spec_s tx_spec;
 static bool send_log_now;
-static char print_dat[50];
+static char print_dat[100];
 static float prev_rx_tstamp;
 //maintains list of slot to node id map
-static uint8_t slot_id_list[MAX_NUM_DEVICES];
+uint8_t slot_id_list[MAX_NUM_DEVICES];
 static bool start_sent;
 static uint64_t last_tx_stamp;
 /*
@@ -20,7 +20,7 @@ static uint64_t last_tx_stamp;
 */
 #define DEBUG_PRINT  1
 
-void tdma_init(uint8_t unique_id)
+void tdma_init(uint8_t unique_id, uint8_t unit_type)
 {
     tdma_spec.slot_size = SLOT_SIZE;
     tdma_spec.num_tx_online = 0;
@@ -33,7 +33,10 @@ void tdma_init(uint8_t unique_id)
     tx_spec.data_slot_id = 255;
     curr_slot = START_SLOT;
     start_sent = false;
-    memset(slot_id_list,0, sizeof(slot_id_list));
+    memset(slot_id_list, 0, sizeof(slot_id_list));
+    if (unit_type == TDMA_SUPERVISOR) {
+        twr_init(unique_id, 0);
+    }
 }
 
 static void print_tdma_spec()
@@ -46,7 +49,18 @@ static void print_tdma_spec()
 
 static void print_twr(struct ds_twr_data_s twr)
 {
-    sprintf(print_dat, "TID: %d TNID: %d TSTAT: %d TPROP: %f", twr.trip_id, twr.trip_node_id, twr.trip_status);
+    /*sprintf(print_dat, "TID: %d TNID: %x TSTAT: %d TPROP: %f", twr.trip_id, twr.trip_node_id, twr.trip_status);
+    uavcan_acquire();
+    uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "TWR", print_dat);
+    uavcan_release();*/
+    sprintf(print_dat, "TID: %d TSTAT: %d T1: %lld T2: %lld T3: %lld", twr.trip_id, twr.trip_status, 
+        twr.transmit_tstamps[0], twr.transmit_tstamps[1], twr.transmit_tstamps[2]);
+    uavcan_acquire();
+    uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "TWR", print_dat);
+    uavcan_release();
+
+    sprintf(print_dat, "TPROP: %f R1: %lld R2: %lld R3: %lld", twr.tprop,
+                twr.receive_tstamps[0], twr.receive_tstamps[1], twr.receive_tstamps[2]);
     uavcan_acquire();
     uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "TWR", print_dat);
     uavcan_release();
@@ -58,12 +72,12 @@ static void print_info(struct message_spec_s msg, struct dw1000_rx_frame_info_s 
         return;
     }
     //print_tdma_spec();
-    sprintf(print_dat,"ONLINE:%d T: %.0f SLOT: %d NID: %x \nPKT_CNT: %d TX_SLOT: %d TNID: %d", \
+    /*sprintf(print_dat,"ONLINE:%d T: %.0f SLOT: %d NID: %x \nPKT_CNT: %d TX_SLOT: %d TNID: %d", \
         msg.tdma_spec.num_tx_online, rx_info.timestamp/UWB_SYS_TICKS, curr_slot, msg.tx_spec.node_id, msg.tx_spec.pkt_cnt , \
         msg.tx_spec.data_slot_id, msg.target_node_id);
     uavcan_acquire();
     uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "RX", print_dat);
-    uavcan_release();
+    uavcan_release();*/
     print_twr(msg.ds_twr_data);
 }
 
@@ -81,9 +95,11 @@ static void super_update_start_slot()
     //pack message
     msg.tdma_spec = tdma_spec;
     msg.tx_spec = tx_spec;
-    msg.target_node_id = 128; //we are broadcasting to start
+    msg.target_node_id = 0; //Reset Target Node ID
     dw1000_disable_transceiver(&uwb_instance);
     uint64_t scheduled_time = (dw1000_get_sys_time(&uwb_instance)+ARB_TIME_SYS_TICKS)&0xFFFFFFFFFFFFFE00ULL;
+    setup_next_trip(slot_id_list, tdma_spec.num_tx_online);
+    send_ranging_pkt(&msg.ds_twr_data, &msg.target_node_id, scheduled_time);
     dw1000_scheduled_transmit(&uwb_instance, scheduled_time, sizeof(msg), &msg, false);
     dw1000_rx_enable(&uwb_instance);
 }
@@ -133,8 +149,11 @@ static void update_data_slot(bool supervisor)
     if (rx_info.err_code == DW1000_RX_ERROR_NONE) {
         prev_rx_tstamp = rx_info.timestamp/UWB_SYS_TICKS;
         print_info(msg, rx_info);
+        if (msg.target_node_id == tx_spec.node_id) {
+            parse_ranging_pkt(&msg.ds_twr_data, msg.tx_spec.node_id, rx_info.timestamp);
+        }
 #ifdef DEBUG_PRINT
-        if(msg.target_node_id == 128) {
+        if(msg.target_node_id == 255) {
             uavcan_acquire();
             sprintf(print_dat,"Wrong Request: NID:%x TX_TSTAMP: %f PREV_MSG: %f THIS_MSG:%f", \
                 msg.tx_spec.node_id, dw1000_get_tx_stamp(&uwb_instance)/UWB_SYS_TICKS, prev_rx_tstamp, rx_info.timestamp/UWB_SYS_TICKS);
@@ -211,7 +230,7 @@ static void req_data_slot(struct dw1000_rx_frame_info_s rx_info)
     //pack message
     msg.tdma_spec = tdma_spec;
     msg.tx_spec = tx_spec;
-    msg.target_node_id = 128; //we are requesting data slot
+    msg.target_node_id = 255; //we are requesting data slot
 
     dw1000_disable_transceiver(&uwb_instance);
     if(dw1000_scheduled_transmit(&uwb_instance, scheduled_time, sizeof(msg), &msg, false)) {
@@ -255,14 +274,19 @@ static void update_subordinate()
         if(!data_slot_allocated) {
             return;
         }
+        if(msg.target_node_id == tx_spec.node_id) {
+            parse_ranging_pkt(&msg.ds_twr_data, msg.tx_spec.node_id, rx_info.timestamp);
+        }
+
+        dw1000_disable_transceiver(&uwb_instance);
         //setup future transmit
         uint64_t scheduled_time = (rx_info.timestamp+DW1000_SID2ST(tx_spec.data_slot_id))&0xFFFFFFFFFFFFFE00ULL;
         //create TWR data set to send
         //pack message
         msg.tdma_spec = tdma_spec;
         msg.tx_spec = tx_spec;
-        msg.target_node_id = 1; //target node we are doing twr with
-        dw1000_disable_transceiver(&uwb_instance);
+        msg.target_node_id = 0; // reset target node id
+        send_ranging_pkt(&msg.ds_twr_data, &msg.target_node_id, scheduled_time);
         if (dw1000_scheduled_transmit(&uwb_instance, scheduled_time, sizeof(msg), &msg, false)) {
             tx_spec.pkt_cnt++;
         }
