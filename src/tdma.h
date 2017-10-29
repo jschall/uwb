@@ -1,3 +1,4 @@
+#pragma once
 #include "ch.h"
 #include "hal.h"
 #include <common/timing.h>
@@ -9,21 +10,23 @@
 #include <common/param.h>
 #include <common/uavcan.h>
 #include "uavcan_node.h"
-
+#include "twr.h"
 //TODO: Convert these to parameter
-#define MAX_DATA_SIZE 127
 #define MAX_HEADER_SIZE 93
 #define TX_RATE 6800000
 #define ARB_TIME ((SLOT_SIZE/3) + (SLOT_SIZE/10))
 
 #define SLOT_SIZE 2000ULL    //2ms
-#define TOTAL_AVAILABLE_SLOTS 127
+#define TOTAL_AVAILABLE_SLOTS 10
+#define MAX_NUM_DEVICES TOTAL_AVAILABLE_SLOTS
+
+//TODO: Implement Supervisor switch in case of timeout
+//TODO: Implement Delayed Receive for more failsafe receive
 
 
 #define UWB_SYS_TICKS 63897.6f
-#define DW1000_SID2ST(x) ((uint64_t)(((x)*(UWB_SYS_TICKS*SLOT_SIZE)) + (UWB_SYS_TICKS*ARB_TIME)))
-
-uint8_t slot_id_list[127];
+#define ARB_TIME_SYS_TICKS ((uint64_t)(ARB_TIME*UWB_SYS_TICKS))
+#define DW1000_SID2ST(x) ((uint64_t)(((x)*(UWB_SYS_TICKS*SLOT_SIZE))))
 
 enum tdma_slots {
     START_SLOT,
@@ -35,14 +38,6 @@ enum tx_types {
     MOBILE_ANCHOR,
     MOBILE_TAG,
     STATIC_TAG
-};
-
-struct ds_twr_data {
-    uint8_t target_node_id;
-    uint32_t tround1;
-    uint32_t treply1;
-    uint32_t tround2;
-    uint32_t treply2;
 };
 
 struct tdma_spec_s {
@@ -63,6 +58,7 @@ struct tx_spec_s {
 struct message_spec_s {
     struct tdma_spec_s tdma_spec;
     struct tx_spec_s tx_spec;
+    struct ds_twr_data_s ds_twr_data;
     uint16_t target_node_id;
 };
 

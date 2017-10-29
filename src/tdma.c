@@ -9,6 +9,10 @@ static struct tx_spec_s tx_spec;
 static bool send_log_now;
 static char print_dat[50];
 static float prev_rx_tstamp;
+//maintains list of slot to node id map
+static uint8_t slot_id_list[MAX_NUM_DEVICES];
+static bool start_sent;
+static uint64_t last_tx_stamp;
 /*
 
     Initialize TDMA vars
@@ -26,31 +30,41 @@ void tdma_init(uint8_t unique_id)
     tx_spec.node_id = unique_id;
     tx_spec.type = STATIC_TAG;
     tx_spec.pkt_cnt = 0;
-    tx_spec.data_slot_id = 127;
+    tx_spec.data_slot_id = 255;
     curr_slot = START_SLOT;
+    start_sent = false;
+    memset(slot_id_list,0, sizeof(slot_id_list));
 }
 
-void print_tdma_spec()
+static void print_tdma_spec()
 {
     sprintf(print_dat,"ONLINE: %d REQ_NID: %x CNT: %d", tdma_spec.num_tx_online, tdma_spec.req_node_id , tdma_spec.cnt);
     uavcan_acquire();
-    uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "INFO", print_dat);
+    uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "TDMA", print_dat);
     uavcan_release();
 }
 
+static void print_twr(struct ds_twr_data_s twr)
+{
+    sprintf(print_dat, "TID: %d TNID: %d TSTAT: %d TPROP: %f", twr.trip_id, twr.trip_node_id, twr.trip_status);
+    uavcan_acquire();
+    uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "TWR", print_dat);
+    uavcan_release();
+}
 
-void print_info(struct message_spec_s msg, struct dw1000_rx_frame_info_s rx_info)
+static void print_info(struct message_spec_s msg, struct dw1000_rx_frame_info_s rx_info)
 {
     if(!send_log_now) {
         return;
     }
     //print_tdma_spec();
-    sprintf(print_dat,"T: %f SLOT: %d NID: %x PKT_CNT: %d TX_SLOT: %d TNID: %d", \
-        rx_info.timestamp/UWB_SYS_TICKS, curr_slot, msg.tx_spec.node_id, msg.tx_spec.pkt_cnt , \
+    sprintf(print_dat,"ONLINE:%d T: %.0f SLOT: %d NID: %x \nPKT_CNT: %d TX_SLOT: %d TNID: %d", \
+        msg.tdma_spec.num_tx_online, rx_info.timestamp/UWB_SYS_TICKS, curr_slot, msg.tx_spec.node_id, msg.tx_spec.pkt_cnt , \
         msg.tx_spec.data_slot_id, msg.target_node_id);
     uavcan_acquire();
-    uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "INFO", print_dat);
+    uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "RX", print_dat);
     uavcan_release();
+    print_twr(msg.ds_twr_data);
 }
 
 /*
@@ -67,12 +81,12 @@ static void super_update_start_slot()
     //pack message
     msg.tdma_spec = tdma_spec;
     msg.tx_spec = tx_spec;
-    msg.target_node_id = 1; //we are broadcasting
+    msg.target_node_id = 128; //we are broadcasting to start
     dw1000_disable_transceiver(&uwb_instance);
-    dw1000_transmit(&uwb_instance, sizeof(msg), &msg, false);
+    uint64_t scheduled_time = (dw1000_get_sys_time(&uwb_instance)+ARB_TIME_SYS_TICKS)&0xFFFFFFFFFFFFFE00ULL;
+    dw1000_scheduled_transmit(&uwb_instance, scheduled_time, sizeof(msg), &msg, false);
     dw1000_rx_enable(&uwb_instance);
 }
-
 
 static void handle_request_slot()
 {
@@ -95,8 +109,8 @@ static void handle_request_slot()
                 return;
             }
         }
-        if(tdma_spec.num_tx_online > 127) {
-            //We only support upto 127 Devices
+        if(tdma_spec.num_tx_online > MAX_NUM_DEVICES) {
+            //We only support upto MAX_NUM_DEVICES Devices
             return;
         }
         tdma_spec.num_tx_online++;
@@ -154,19 +168,17 @@ void tdma_supervisor_run()
     uint16_t cnt = 0;
     tx_spec.data_slot_id = 0;
     while (true) {
-        update_curr_slot();
+        update_curr_slot(); //update slots based on CPU clock
         switch (curr_slot) {
             case START_SLOT:
                 cnt++;
-                //split into two sleeps, so as to ensure 
-                //we receive packets in the center of upcomming sleeps
+                //we only send start here incase of faillure or initialisation
                 super_update_start_slot();
                 break;
             case DATA_SLOT:
                 update_data_slot(true);
                 break;
             case REQUEST_SLOT:
-                //We might receive a request packet sometime in the middle of this sleep
                 handle_request_slot();
                 break;
             default:
@@ -203,18 +215,14 @@ static void req_data_slot(struct dw1000_rx_frame_info_s rx_info)
 
     dw1000_disable_transceiver(&uwb_instance);
     if(dw1000_scheduled_transmit(&uwb_instance, scheduled_time, sizeof(msg), &msg, false)) {
-#ifdef DEBUG_PRINT
         uavcan_acquire();
         sprintf(print_dat, "Requesting Data Slot @ %d for %x", tdma_spec.num_tx_online+1, tx_spec.node_id);
         uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "Sub: ", print_dat);
         uavcan_release();
-#endif
     } else {
-#ifdef DEBUG_PRINT
         uavcan_acquire();
         uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "Sub: ", "Requesting Data Slot Failed");
         uavcan_release();
-#endif
     }
     //Go and wait for time slot allocation
     dw1000_rx_enable(&uwb_instance);
@@ -292,7 +300,7 @@ void tdma_sniffer_run()
     dw1000_init(&uwb_instance, 3, BOARD_PAL_LINE_SPI3_UWB_CS, BOARD_PAL_LINE_UWB_NRST);
     dw1000_rx_enable(&uwb_instance);
     struct message_spec_s msg;
-    uint8_t cnt = 0;
+    uint32_t cnt = 0;
     curr_slot = 0;
     while(true) {
         struct dw1000_rx_frame_info_s rx_info = dw1000_receive(&uwb_instance, sizeof(msg), &msg);
@@ -301,7 +309,7 @@ void tdma_sniffer_run()
             tdma_spec = msg.tdma_spec;
             print_info(msg, rx_info);
         }
-        if(cnt % 2000 <= 6) {
+        if(cnt % 200 <= 6) {
             send_log_now = true;
         } else {
             send_log_now = false;
