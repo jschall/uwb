@@ -26,156 +26,6 @@
 #include <common/uavcan.h>
 #include "uavcan_node.h"
 
-static void ss_twr_initiator_run(void) {
-    struct dw1000_instance_s uwb_instance;
-    dw1000_init(&uwb_instance, 3, BOARD_PAL_LINE_SPI3_UWB_CS, BOARD_PAL_LINE_UWB_NRST);
-    uint32_t tprev_us = 0;
-    uint8_t i=0;
-    while (true) {
-        uint32_t tnow_us = micros();
-        if (tnow_us-tprev_us > 200000) {
-            uavcan_acquire();
-            tprev_us = tnow_us;
-            char msg[50];
-            int n = sprintf(msg, "message %u", i);
-            dw1000_transmit(&uwb_instance, n, msg, true);
-//             uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "init tx", msg);
-
-            while(true) {
-                if (micros()-tnow_us > 5000) {
-//                     uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "init rx t/o", "");
-                    dw1000_disable_transceiver(&uwb_instance);
-                    break;
-                }
-
-                char rxbuf[50];
-                struct dw1000_rx_frame_info_s rx_info = dw1000_receive(&uwb_instance, sizeof(rxbuf)-1, rxbuf);
-                if (rx_info.err_code == DW1000_RX_ERROR_NONE) {
-                    dw1000_disable_transceiver(&uwb_instance);
-
-                    uint64_t tround = (rx_info.timestamp-dw1000_get_tx_stamp(&uwb_instance));
-                    uint32_t treply;
-                    memcpy(&treply, rxbuf, sizeof(treply));
-                    double clksca = (double)rx_info.rx_ttcko/(double)rx_info.rx_ttcki;
-                    double tprop = 0.5*(tround-treply);
-                    sprintf(msg, "%f %f", tprop, clksca);
-//                     uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "init rx", msg);
-                    break;
-                }
-            }
-
-            i++;
-            uavcan_release();
-        }
-        chThdSleepMicroseconds(1000);
-    }
-}
-
-static void ss_twr_responder_run(void) {
-    struct dw1000_instance_s uwb_instance;
-    dw1000_init(&uwb_instance, 3, BOARD_PAL_LINE_SPI3_UWB_CS, BOARD_PAL_LINE_UWB_NRST);
-    dw1000_rx_enable(&uwb_instance);
-    uint32_t tprev_us = 0;
-    while (true) {
-        char rxbuf[50];
-        struct dw1000_rx_frame_info_s rx_info = dw1000_receive(&uwb_instance, sizeof(rxbuf)-1, rxbuf);
-        if (rx_info.err_code == DW1000_RX_ERROR_NONE) {
-            uavcan_acquire();
-            dw1000_disable_transceiver(&uwb_instance);
-            uint64_t scheduled_time = (rx_info.timestamp+65536ULL*1000ULL)&0xFFFFFFFFFFFFFE00ULL;
-            uint32_t dly = (uint32_t)(scheduled_time-rx_info.timestamp);
-            if (dw1000_scheduled_transmit(&uwb_instance, scheduled_time, sizeof(dly), &dly, true)) {
-                rxbuf[rx_info.len] = 0;
-//                 uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "resp", rxbuf);
-            } else {
-                uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "resp fail", "");
-            }
-            uavcan_release();
-        }
-    }
-}
-
-static void receiver_run(void) {
-    struct dw1000_instance_s uwb_instance;
-    dw1000_init(&uwb_instance, 3, BOARD_PAL_LINE_SPI3_UWB_CS, BOARD_PAL_LINE_UWB_NRST);
-    dw1000_rx_enable(&uwb_instance);
-    uint32_t tprev_us = 0;
-    while (true) {
-        uint32_t tnow_us = micros();
-        if (tnow_us-tprev_us > 100000) {
-            tprev_us = tnow_us;
-            char rxbuf[50];
-            struct dw1000_rx_frame_info_s rx_info = dw1000_receive(&uwb_instance, sizeof(rxbuf)-1, rxbuf);
-            if (rx_info.err_code == DW1000_RX_ERROR_NONE) {
-                rxbuf[rx_info.len] = 0;
-                char msg[100];
-                sprintf(msg, "%llu %e %s", rx_info.timestamp, ((float)rx_info.rx_ttcko)/((float)rx_info.rx_ttcki), rxbuf);
-                uavcan_acquire();
-                uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "rx", msg);
-                uavcan_release();
-            }
-        }
-        chThdSleepMicroseconds(1000);
-    }
-}
-
-static void transmitter_run(void) {
-    struct dw1000_instance_s uwb_instance;
-    dw1000_init(&uwb_instance, 3, BOARD_PAL_LINE_SPI3_UWB_CS, BOARD_PAL_LINE_UWB_NRST);
-    uint32_t tprev_us = 0;
-    uint8_t i=0;
-    while (true) {
-        uint32_t tnow_us = micros();
-        if (tnow_us-tprev_us > 200000) {
-            tprev_us = tnow_us;
-            char msg[50];
-            int n = snprintf(msg, sizeof(msg), "message %u", i);
-            if (n > 0 && n<sizeof(msg)) {
-                dw1000_transmit(&uwb_instance, n, msg, false);
-                uavcan_acquire();
-                uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "tx", msg);
-                uavcan_release();
-            }
-            i++;
-        }
-        chThdSleepMicroseconds(1000);
-    }
-}
-
-PARAM_DEFINE_FLOAT32_PARAM_STATIC(param_a, "a", 4, 3, 5)
-PARAM_DEFINE_INT64_PARAM_STATIC(param_b, "b", 7, 7, 7)
-PARAM_DEFINE_INT32_PARAM_STATIC(param_c, "c", 7, 7, 7)
-PARAM_DEFINE_INT16_PARAM_STATIC(param_d, "d", 7, 7, 7)
-PARAM_DEFINE_INT8_PARAM_STATIC(param_e, "e", 7, 7, 7)
-PARAM_DEFINE_UINT32_PARAM_STATIC(param_f, "f", 7, 7, 7)
-PARAM_DEFINE_UINT16_PARAM_STATIC(param_g, "g", 7, 7, 7)
-PARAM_DEFINE_UINT8_PARAM_STATIC(param_h, "h", 7, 7, 7)
-PARAM_DEFINE_STRING_PARAM_STATIC(param_j, "j", "blah", 128)
-PARAM_DEFINE_BOOL_PARAM_STATIC(param_i, "i", true)
-
-#include <omd_uavcan/omd_uavcan.h>
-#include <uavcan.protocol.NodeStatus.h>
-
-static uint32_t encode_nodestatus(void* in, void* out) {
-    return encode_uavcan_protocol_NodeStatus(out, in);
-}
-
-static struct omd_uavcan_message_descriptor_s uavcan_protocol_NodeStatus_descriptor = {
-    UAVCAN_PROTOCOL_NODESTATUS_DT_SIG,
-    UAVCAN_PROTOCOL_NODESTATUS_DT_ID,
-    CanardTransferTypeBroadcast,
-    sizeof(struct uavcan_protocol_NodeStatus_s),
-    UAVCAN_PROTOCOL_NODESTATUS_MAX_PACK_SIZE,
-    encode_nodestatus,
-    decode_uavcan_protocol_NodeStatus
-};
-
-static void nodestatus_handler(struct omd_uavcan_deserialized_message_s* msg_wrapper, void* ctx) {
-    struct uavcan_protocol_NodeStatus_s* msg = (struct uavcan_protocol_NodeStatus_s*)msg_wrapper->msg;
-
-    chSysHalt("oh shit, i don't know what to do");
-}
-
 RUN_BEFORE(OMD_UAVCAN_INIT) {
     const CANConfig cancfg = {
         CAN_MCR_ABOM | CAN_MCR_AWUM | CAN_MCR_TXFP,
@@ -186,43 +36,38 @@ RUN_BEFORE(OMD_UAVCAN_INIT) {
     canStart(&CAND1, &cancfg);
 }
 
-int main(void) {
-    omd_uavcan_set_node_id(0, 42);
+#include <canard/uavcan.protocol.NodeStatus.h>
+#include <canard/uavcan.protocol.debug.LogMessage.h>
 
-    struct uavcan_protocol_NodeStatus_s msg;
-    msg.uptime_sec = 0;
-    msg.health = UAVCAN_PROTOCOL_NODESTATUS_HEALTH_OK;
-    msg.mode = UAVCAN_PROTOCOL_NODESTATUS_MODE_OPERATIONAL;
-    msg.sub_mode = 0;
-    msg.vendor_specific_status_code = 0;
+static void status_topic_handler(size_t msg_size, const void* msg, void* ctx) {
+    struct uavcan_protocol_debug_LogMessage_s log_message;
+    log_message.level.value = UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG;
+    log_message.source_len = 0;
+    strcpy((char*)log_message.text, "heyo!");
+    log_message.text_len = strlen((char*)log_message.text);
+    uavcan_broadcast(0, &uavcan_protocol_debug_LogMessage_descriptor, CANARD_TRANSFER_PRIORITY_LOW, &log_message);
+}
+
+int main(void) {
+    uavcan_set_node_id(0, 42);
+
+    struct pubsub_topic_s* status_topic = uavcan_get_message_topic(0, &uavcan_protocol_NodeStatus_descriptor);
+    struct pubsub_listener_s status_listener;
+    pubsub_init_and_register_listener(status_topic, &status_listener);
+    pubsub_listener_set_handler_cb(&status_listener, status_topic_handler, NULL);
+
+    struct uavcan_protocol_NodeStatus_s node_status;
+    node_status.uptime_sec = 0;
+    node_status.health = UAVCAN_PROTOCOL_NODESTATUS_HEALTH_OK;
+    node_status.mode = UAVCAN_PROTOCOL_NODESTATUS_MODE_OPERATIONAL;
+    node_status.sub_mode = 0;
+    node_status.vendor_specific_status_code = 0;
 
     while(true) {
-        msg.uptime_sec++;
-        omd_uavcan_broadcast(0, &uavcan_protocol_NodeStatus_descriptor, CANARD_TRANSFER_PRIORITY_LOW, &msg);
-        chThdSleepMilliseconds(1000);
+        node_status.uptime_sec++;
+        uavcan_broadcast(0, &uavcan_protocol_NodeStatus_descriptor, CANARD_TRANSFER_PRIORITY_LOW, &node_status);
+        pubsub_listener_handle_until_timeout(&status_listener, MS2ST(1000));
     }
-
-//     struct pubsub_listener_s nodestatus_listener;
-//     struct pubsub_listener_s param_getset_req_listener;
-//
-//     omd_uavcan_subscribe(&nodestatus_listener, &uavcan_protocol_NodeStatus_descriptor, nodestatus_handler, NULL);
-//     omd_uavcan_subscribe(&param_getset_req_listener, &uavcan_protocol_param_GetSet_req_descriptor, );
-//
-//     const struct pubsub_listener_s** listener_list = {&nodestatus_listener, &param_getset_req_listener};
-//     pubsub_multiple_listener_handle_until_timeout(sizeof(listener_list)/sizeof(listener_list[0]), listener_list, TIME_INFINITE);
-
-//     uavcan_node_init();
-
-//     param_print_table();
-
-//     uint8_t unique_id[12];
-//     board_get_unique_id(unique_id, sizeof(unique_id));
-
-//     if (unique_id[10] == 0x1F) {
-//         ss_twr_initiator_run();
-//     } else {
-//         ss_twr_responder_run();
-//     }
 
     return 0;
 }

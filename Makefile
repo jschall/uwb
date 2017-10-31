@@ -129,7 +129,7 @@ CSRC = $(STARTUPSRC) \
        $(TESTSRC) \
        $(COMMON_CSRC) \
        $(APP_CSRC) \
-       $(shell find ./omd_uavcan -name "*.c")
+       $(shell find ./uavcan -name "*.c")
 
 # C++ sources that can be compiled in ARM or THUMB mode depending on the global
 # setting.
@@ -164,7 +164,7 @@ INCDIR = $(CHIBIOS)/os/license \
          $(HALINC) $(PLATFORMINC) $(BOARDINC) $(TESTINC) \
          $(CHIBIOS)/community/os/various \
          $(CHIBIOS)/os/various \
-         ./include $(COMMON_INC) ./omd_uavcan/include
+         ./include $(COMMON_INC) ./uavcan/include
 
 #
 # Project, sources and paths
