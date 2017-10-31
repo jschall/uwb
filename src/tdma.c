@@ -99,7 +99,7 @@ static void super_update_start_slot()
     dw1000_disable_transceiver(&uwb_instance);
     uint64_t scheduled_time = (dw1000_get_sys_time(&uwb_instance)+ARB_TIME_SYS_TICKS)&0xFFFFFFFFFFFFFE00ULL;
     setup_next_trip(slot_id_list, tdma_spec.num_tx_online);
-    send_ranging_pkt(&msg.ds_twr_data, &msg.target_node_id, scheduled_time);
+    send_ranging_pkt(&msg.ds_twr_data, &msg.target_node_id, scheduled_time + dw1000_get_ant_delay());
     dw1000_scheduled_transmit(&uwb_instance, scheduled_time, sizeof(msg), &msg, false);
     dw1000_rx_enable(&uwb_instance);
 }
@@ -286,7 +286,7 @@ static void update_subordinate()
         msg.tdma_spec = tdma_spec;
         msg.tx_spec = tx_spec;
         msg.target_node_id = 0; // reset target node id
-        send_ranging_pkt(&msg.ds_twr_data, &msg.target_node_id, scheduled_time);
+        send_ranging_pkt(&msg.ds_twr_data, &msg.target_node_id, scheduled_time + dw1000_get_ant_delay());
         if (dw1000_scheduled_transmit(&uwb_instance, scheduled_time, sizeof(msg), &msg, false)) {
             tx_spec.pkt_cnt++;
         }
