@@ -1,5 +1,6 @@
 #include <string.h>
 #include <hal.h>
+#include <common/ctor.h>
 
 #if HAL_USE_PAL || defined(__DOXYGEN__)
 /**
@@ -48,6 +49,16 @@ const PALConfig pal_default_config = {
 #endif
 };
 #endif
+
+RUN_BEFORE(OMD_UAVCAN_INIT) {
+    const CANConfig cancfg = {
+        CAN_MCR_ABOM | CAN_MCR_AWUM | CAN_MCR_TXFP,
+        CAN_BTR_SJW(0) | CAN_BTR_TS2(1) |
+        CAN_BTR_TS1(14) | CAN_BTR_BRP((STM32_PCLK1/18)/1000000 - 1)
+    };
+
+    canStart(&CAND1, &cancfg);
+}
 
 /**
  * @brief   Early initialization code.

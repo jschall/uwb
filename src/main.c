@@ -26,24 +26,16 @@
 #include <common/uavcan.h>
 #include "uavcan_node.h"
 
-RUN_BEFORE(OMD_UAVCAN_INIT) {
-    const CANConfig cancfg = {
-        CAN_MCR_ABOM | CAN_MCR_AWUM | CAN_MCR_TXFP,
-        CAN_BTR_SJW(0) | CAN_BTR_TS2(2-1) |
-        CAN_BTR_TS1(15-1) | CAN_BTR_BRP((STM32_PCLK1/18)/1000000 - 1)
-    };
-
-    canStart(&CAND1, &cancfg);
-}
-
 #include <canard/uavcan.protocol.NodeStatus.h>
 #include <canard/uavcan.protocol.debug.LogMessage.h>
 
-static void status_topic_handler(size_t msg_size, const void* msg, void* ctx) {
+static void status_topic_handler(size_t msg_size, const void* buf, void* ctx) {
+    const struct uavcan_deserialized_message_s* wrapper = buf;
+    const struct uavcan_protocol_NodeStatus_s* msg = (const struct uavcan_protocol_NodeStatus_s*)wrapper->msg;
     struct uavcan_protocol_debug_LogMessage_s log_message;
     log_message.level.value = UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG;
     log_message.source_len = 0;
-    strcpy((char*)log_message.text, "heyo!");
+    sprintf((char*)log_message.text, "%u %u %u %u %u %u", wrapper->source_node_id, msg->uptime_sec, msg->health, msg->mode, msg->sub_mode, msg->vendor_specific_status_code);
     log_message.text_len = strlen((char*)log_message.text);
     uavcan_broadcast(0, &uavcan_protocol_debug_LogMessage_descriptor, CANARD_TRANSFER_PRIORITY_LOW, &log_message);
 }
