@@ -459,6 +459,12 @@ uint64_t dw1000_get_sys_time(struct dw1000_instance_s* instance) {
     return ret;
 }
 
+uint16_t dw1000_get_ant_delay(struct dw1000_instance_s* instance) {
+    uint16_t ret = 0;
+    dw1000_read(instance, 0x18, 0, 2, &ret);
+    return ret;
+}
+
 static void dw1000_clock_force_sys_xti(struct dw1000_instance_s* instance) {
     if (!instance) {
         return;
