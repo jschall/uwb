@@ -132,7 +132,7 @@ static void dw1000_config(struct dw1000_instance_s* instance) {
     // 0x18       2  TX_ANTD
     {
         // [0x00:0x01] TX_ANTD
-        dw1000_write16(instance, 0x18, 0, 21620);
+        dw1000_write16(instance, 0x18, 0, 0);
     }
     // 0x19       5  SYS_STATE   not config
     // 0x1A       4  ACK_RESP_T  -
@@ -250,7 +250,7 @@ static void dw1000_config(struct dw1000_instance_s* instance) {
         // [0x1000:0x1001] LDE_PPINDX
         // [0x1002:0x1003] LDE_PPAMPL
         // [0x1804:0x1805] LDE_RXANTD
-        dw1000_write16(instance, 0x2E, 0x1804, 21620);
+        dw1000_write16(instance, 0x2E, 0x1804, 0);
         // [0x1806:0x1807] LDE_CFG2
         dw1000_write16(instance, 0x2E, 0x1806, dw1000_conf_lde_cfg2(config));
         // [0x2804:0x2805] LDE_REPC
