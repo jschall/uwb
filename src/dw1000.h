@@ -77,3 +77,4 @@ void dw1000_handle_interrupt(struct dw1000_instance_s* instance);
 uint64_t dw1000_get_tx_stamp(struct dw1000_instance_s* instance);
 uint64_t dw1000_get_sys_time(struct dw1000_instance_s* instance);
 uint16_t dw1000_get_ant_delay(struct dw1000_instance_s* instance);
+double dw1000_get_range_bias(uint8_t chan, float range, uint8_t prf);

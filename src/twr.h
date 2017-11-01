@@ -40,7 +40,8 @@ enum trip_statuses {
 
 struct ds_twr_data_s {
     uint8_t trip_id;        //Id of the trip we are making
-    uint8_t trip_node_id;   //ID of trip instigator
+    uint8_t deviceA;        //ID of trip instigator
+    uint8_t deviceB;
     uint8_t trip_status;
     uint64_t transmit_tstamps[3];
     uint64_t receive_tstamps[3];
@@ -49,7 +50,8 @@ struct ds_twr_data_s {
 
 struct range_sol_s {
     uint32_t timestamp; //CPU Timestamp
-    uint8_t node_id;
+    uint8_t deviceA;
+    uint8_t deviceB;
     float tprop;    //this will be in meters
 };
 

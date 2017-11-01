@@ -27,18 +27,19 @@ void twr_init(uint8_t _my_node_id, uint8_t _my_slot_id)
     memset(range_sol, 0, MAX_NUM_DEVICES*sizeof(struct range_sol_s));
 }
 
-static void record_range_sol(struct ds_twr_data_s *pkt, uint8_t node_id)
+static void record_range_sol(struct ds_twr_data_s *pkt)
 {
     for (uint8_t i = 0; i < num_sol; i++) {
         //Have we already recoded this node before?
-        if (range_sol[i].node_id == pkt) {
+        if (range_sol[i].deviceA == pkt->deviceA && range_sol[i].deviceB == pkt->deviceB) {
             range_sol[i].tprop = pkt->tprop;
             range_sol[i].timestamp = millis();
             return;
         }
     }
     if (num_sol < MAX_NUM_DEVICES) {
-        range_sol[num_sol].node_id = node_id;
+        range_sol[num_sol].deviceA = pkt->deviceA;
+        range_sol[num_sol].deviceB = pkt->deviceB;
         range_sol[num_sol].tprop = pkt->tprop;
         range_sol[num_sol].timestamp = millis();
         num_sol++;
@@ -94,7 +95,7 @@ static void handle_pkt(uint8_t receive_node_id, uint64_t receive_tstamp, struct 
             pkt->receive_tstamps[2] = receive_tstamp;
             //We have completed the trip for double sided two way ranging
             do_ds_twr(pkt);
-            record_range_sol(pkt, receive_node_id);
+            record_range_sol(pkt);
             pkt->trip_status = DS_TWR_SOL;
             memcpy(&buffer.item[buffer.tail].dat, pkt, sizeof(struct ds_twr_data_s));
             buffer.item[buffer.tail].target_node_id = receive_node_id;
@@ -102,7 +103,7 @@ static void handle_pkt(uint8_t receive_node_id, uint64_t receive_tstamp, struct 
             break;
         case DS_TWR_SOL:
             //It's done just record the data
-            record_range_sol(pkt, receive_node_id);
+            record_range_sol(pkt);
             break;
         default:
             break;
@@ -126,7 +127,7 @@ void setup_next_trip(uint8_t *slot_map, uint8_t num_online)
     if (my_slot_id == num_online) {
         return;
     }
-    if (curr_idx >= (num_online - my_slot_id - 1)) {
+    if (curr_idx > (num_online - my_slot_id - 1)) {
         curr_idx = 0;
     }
     if (slot_map[curr_idx + my_slot_id] == 0) {
@@ -148,7 +149,8 @@ void setup_next_trip(uint8_t *slot_map, uint8_t num_online)
 
     buffer.item[buffer.tail].target_node_id = slot_map[curr_idx + my_slot_id];
     buffer.item[buffer.tail].dat.trip_id = trip_cnt++;
-    buffer.item[buffer.tail].dat.trip_node_id = my_node_id;
+    buffer.item[buffer.tail].dat.deviceA = my_node_id;
+    buffer.item[buffer.tail].dat.deviceB = slot_map[curr_idx + my_slot_id];
     buffer.item[buffer.tail].dat.trip_status = TRIP_START;
     memset(buffer.item[buffer.tail].dat.transmit_tstamps, 0, 3*sizeof(uint64_t));
     memset(buffer.item[buffer.tail].dat.receive_tstamps, 0, 3*sizeof(uint64_t));
@@ -168,6 +170,8 @@ void send_ranging_pkt(struct ds_twr_data_s *pkt, uint8_t *target_node_id,
     uint64_t transmit_tstamp)
 {
     //No data available
+    memset(pkt, 0, sizeof(struct ds_twr_data_s));
+    *target_node_id = 0;
     if (buffer.head == buffer.tail) {
         return;
     }

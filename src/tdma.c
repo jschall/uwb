@@ -13,6 +13,7 @@ static float prev_rx_tstamp;
 uint8_t slot_id_list[MAX_NUM_DEVICES];
 static bool start_sent;
 static uint64_t last_tx_stamp;
+static uint64_t slot_start_timestamp;
 /*
 
     Initialize TDMA vars
@@ -49,11 +50,17 @@ static void print_tdma_spec()
 
 static void print_twr(struct ds_twr_data_s twr)
 {
-    /*sprintf(print_dat, "TID: %d TNID: %x TSTAT: %d TPROP: %f", twr.trip_id, twr.trip_node_id, twr.trip_status);
-    uavcan_acquire();
-    uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "TWR", print_dat);
-    uavcan_release();*/
-    sprintf(print_dat, "TID: %d TSTAT: %d T1: %lld T2: %lld T3: %lld", twr.trip_id, twr.trip_status, 
+    //sprintf(print_dat, "TID: %d DeviceA: %x DeviceB: %x TSTAT: %d", twr.trip_id, twr.deviceA, twr.deviceB, twr.trip_status);
+    //uavcan_acquire();
+    //uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "TWR", print_dat);
+    //uavcan_release();
+    if(twr.trip_status == DS_TWR_SOL) {
+        sprintf(print_dat,"DeviceA: %x DeviceB: %x Dist: %f",twr.deviceA, twr.deviceB, twr.tprop);
+        uavcan_acquire();
+        uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "TWR", print_dat);
+        uavcan_release();
+    }
+    /*sprintf(print_dat, "TID: %d TSTAT: %d T1: %lld T2: %lld T3: %lld", twr.trip_id, twr.trip_status, 
         twr.transmit_tstamps[0], twr.transmit_tstamps[1], twr.transmit_tstamps[2]);
     uavcan_acquire();
     uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "TWR", print_dat);
@@ -63,7 +70,7 @@ static void print_twr(struct ds_twr_data_s twr)
                 twr.receive_tstamps[0], twr.receive_tstamps[1], twr.receive_tstamps[2]);
     uavcan_acquire();
     uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "TWR", print_dat);
-    uavcan_release();
+    uavcan_release();*/
 }
 
 static void print_info(struct message_spec_s msg, struct dw1000_rx_frame_info_s rx_info)
@@ -99,7 +106,7 @@ static void super_update_start_slot()
     dw1000_disable_transceiver(&uwb_instance);
     uint64_t scheduled_time = (dw1000_get_sys_time(&uwb_instance)+ARB_TIME_SYS_TICKS)&0xFFFFFFFFFFFFFE00ULL;
     setup_next_trip(slot_id_list, tdma_spec.num_tx_online);
-    send_ranging_pkt(&msg.ds_twr_data, &msg.target_node_id, scheduled_time + dw1000_get_ant_delay());
+    send_ranging_pkt(&msg.ds_twr_data, &msg.target_node_id, scheduled_time + dw1000_get_ant_delay(&uwb_instance));
     dw1000_scheduled_transmit(&uwb_instance, scheduled_time, sizeof(msg), &msg, false);
     dw1000_rx_enable(&uwb_instance);
 }
@@ -251,46 +258,54 @@ static void update_subordinate()
 {
     struct message_spec_s msg;
     struct dw1000_rx_frame_info_s rx_info = dw1000_receive(&uwb_instance, sizeof(msg), &msg);
-
+    static bool transmit_scheduled = false;
     if(rx_info.err_code == DW1000_RX_ERROR_NONE) {
         print_info(msg, rx_info);
         if(msg.tx_spec.data_slot_id == 0) { //this is a message from supervisor
+            transmit_scheduled = false;
+            //Also setup ranging request of our own
+            setup_next_trip(slot_id_list, tdma_spec.num_tx_online);
+            slot_start_timestamp = rx_info.timestamp;
             tdma_spec = msg.tdma_spec;
+            //check if it's our turn to ask for data slot, if yes request
+            if(tdma_spec.cnt%256 == tx_spec.node_id && !data_slot_allocated) {
+                req_data_slot(rx_info);
+            }
+
+            if (!data_slot_allocated && tdma_spec.req_node_id == tx_spec.node_id) {
+                tx_spec.data_slot_id = tdma_spec.res_data_slot;
+                data_slot_allocated = true;
+                twr_init(tx_spec.node_id, tx_spec.data_slot_id);
+            }
         } else {
             //***Handle message Here****
-            return;
+            if (msg.tx_spec.data_slot_id > tx_spec.data_slot_id) {
+                slot_id_list[msg.tx_spec.data_slot_id - tx_spec.data_slot_id] = msg.tx_spec.node_id;
+            }
         }
-        //check if it's our turn to ask for data slot, if yes request
-        if(tdma_spec.cnt%256 == tx_spec.node_id && !data_slot_allocated) {
-            req_data_slot(rx_info);
-        }
-
-        if (!data_slot_allocated && tdma_spec.req_node_id == tx_spec.node_id) {
-            tx_spec.data_slot_id = tdma_spec.res_data_slot;
-            data_slot_allocated = true;
-        }
-
-
         if(!data_slot_allocated) {
             return;
         }
         if(msg.target_node_id == tx_spec.node_id) {
             parse_ranging_pkt(&msg.ds_twr_data, msg.tx_spec.node_id, rx_info.timestamp);
         }
-
-        dw1000_disable_transceiver(&uwb_instance);
-        //setup future transmit
-        uint64_t scheduled_time = (rx_info.timestamp+DW1000_SID2ST(tx_spec.data_slot_id))&0xFFFFFFFFFFFFFE00ULL;
-        //create TWR data set to send
-        //pack message
-        msg.tdma_spec = tdma_spec;
-        msg.tx_spec = tx_spec;
-        msg.target_node_id = 0; // reset target node id
-        send_ranging_pkt(&msg.ds_twr_data, &msg.target_node_id, scheduled_time + dw1000_get_ant_delay());
-        if (dw1000_scheduled_transmit(&uwb_instance, scheduled_time, sizeof(msg), &msg, false)) {
-            tx_spec.pkt_cnt++;
+    }
+    if (!transmit_scheduled && data_slot_allocated) {
+        if ((dw1000_get_sys_time(&uwb_instance) - slot_start_timestamp) >= (DW1000_SID2ST(tx_spec.data_slot_id-1) + ARB_TIME_SYS_TICKS)) {
+            dw1000_disable_transceiver(&uwb_instance);
+            //setup future transmit
+            uint64_t scheduled_time = (slot_start_timestamp+DW1000_SID2ST(tx_spec.data_slot_id))&0xFFFFFFFFFFFFFE00ULL;
+            //create TWR data set to send
+            //pack message
+            msg.tdma_spec = tdma_spec;
+            msg.tx_spec = tx_spec;
+            msg.target_node_id = 0; // reset target node id
+            send_ranging_pkt(&msg.ds_twr_data, &msg.target_node_id, scheduled_time + dw1000_get_ant_delay(&uwb_instance));
+            if (dw1000_scheduled_transmit(&uwb_instance, scheduled_time, sizeof(msg), &msg, true)) {
+                tx_spec.pkt_cnt++;
+            }
+            transmit_scheduled = true;
         }
-        dw1000_rx_enable(&uwb_instance);
     }
 }
 
