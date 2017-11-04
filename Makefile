@@ -1,7 +1,9 @@
 BOARD ?= org.proficnc.uwb_1.0
 
-CSRC = $(shell find src -name "*.c") $(shell find uavcan/src -name "*.c")
-INCDIR = ./include ./uavcan/include
+CSRC = $(shell find src -name "*.c")
+INCDIR = ./include
+
+MODULES_ENABLED =
 
 include omd_common/include.mk
 
