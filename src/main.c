@@ -30,12 +30,14 @@
 #include <uavcan.protocol.debug.LogMessage.h>
 
 static void status_topic_handler(size_t msg_size, const void* buf, void* ctx) {
+    (void)msg_size;
+    (void)ctx;
     const struct uavcan_deserialized_message_s* wrapper = buf;
     const struct uavcan_protocol_NodeStatus_s* msg = (const struct uavcan_protocol_NodeStatus_s*)wrapper->msg;
     struct uavcan_protocol_debug_LogMessage_s log_message;
     log_message.level.value = UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG;
     log_message.source_len = 0;
-    sprintf((char*)log_message.text, "%u %u %u %u %u %u", wrapper->source_node_id, msg->uptime_sec, msg->health, msg->mode, msg->sub_mode, msg->vendor_specific_status_code);
+    sprintf((char*)log_message.text, "%u %u %u %u %u %u", wrapper->source_node_id, (unsigned int)msg->uptime_sec, msg->health, msg->mode, msg->sub_mode, msg->vendor_specific_status_code);
     log_message.text_len = strlen((char*)log_message.text);
     uavcan_broadcast(0, &uavcan_protocol_debug_LogMessage_descriptor, CANARD_TRANSFER_PRIORITY_LOW, &log_message);
 }
