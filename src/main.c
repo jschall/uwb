@@ -26,8 +26,8 @@
 #include <common/uavcan.h>
 #include "uavcan_node.h"
 
-#include <canard/uavcan.protocol.NodeStatus.h>
-#include <canard/uavcan.protocol.debug.LogMessage.h>
+#include <uavcan.protocol.NodeStatus.h>
+#include <uavcan.protocol.debug.LogMessage.h>
 
 static void status_topic_handler(size_t msg_size, const void* buf, void* ctx) {
     const struct uavcan_deserialized_message_s* wrapper = buf;
