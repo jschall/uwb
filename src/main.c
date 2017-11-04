@@ -16,14 +16,14 @@
 
 #include "ch.h"
 #include "hal.h"
-#include <common/timing.h>
+#include <timing/timing.h>
 #include <common/helpers.h>
-#include "dw1000.h"
+#include <dw1000/dw1000.h>
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
-#include <common/param.h>
-#include <common/uavcan.h>
+#include <param/param.h>
+#include <uavcan/uavcan.h>
 #include "uavcan_node.h"
 
 #include <uavcan.protocol.NodeStatus.h>

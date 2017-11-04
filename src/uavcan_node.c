@@ -3,7 +3,7 @@
 // #include <common/can.h>
 // #include <common/uavcan.h>
 // #include <common/shared_boot_msg.h>
-// #include <common/timing.h>
+// #include <timing/timing.h>
 // #include <common/helpers.h>
 // #include <common/param.h>
 // #include <string.h>
