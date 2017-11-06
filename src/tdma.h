@@ -28,6 +28,12 @@
 #define ARB_TIME_SYS_TICKS ((uint64_t)(ARB_TIME*UWB_SYS_TICKS))
 #define DW1000_SID2ST(x) ((uint64_t)(((x)*(UWB_SYS_TICKS*SLOT_SIZE))))
 
+#define MODULE_TYPE_SUPER   0
+#define MODULE_TYPE_SUB     1
+#define MODULE_TYPE_SNIFFER 2
+
+#define MODULE_TYPE MODULE_TYPE_SNIFFER
+
 enum tdma_slots {
     START_SLOT,
     DATA_SLOT,
@@ -70,6 +76,10 @@ struct message_spec_s {
 
 
 void tdma_init(uint8_t unique_id, uint8_t unit_type);
+#if MODULE_TYPE == MODULE_TYPE_SUPER
 void tdma_supervisor_run();
+#elif MODULE_TYPE == MODULE_TYPE_SUB 
 void tdma_subordinate_run();
+#else
 void tdma_sniffer_run();
+#endif

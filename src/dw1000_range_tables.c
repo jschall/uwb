@@ -632,14 +632,14 @@ const uint8_t range25cm64PRFwb[2][NUM_64M_OFFSETWB] =
  *
  * returns correction needed in meters
  */
-double dw1000_get_range_bias(uint8_t chan, float range, uint8_t prf)
+float dw1000_get_range_bias(uint8_t chan, float range, uint8_t prf)
 {
     //first get the lookup index that corresponds to given range for a particular channel at 16M PRF
     int i = 0 ;
     int chanIdx ;
     int cmoffseti ;                                 // integer number of CM offset
 
-    double mOffset ;                                // final offset result in metres
+    float mOffset ;                                // final offset result in metres
 
     // NB: note we may get some small negitive values e.g. up to -50 cm.
 

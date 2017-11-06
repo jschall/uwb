@@ -28,9 +28,14 @@
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
+#include <stdbool.h>
 
 #define TIME_TO_METERS 0.0046917639786159f
-
+#define METERS_TO_TIME 213.13945f
+#define DW1000_CAL_CHAN_NUM DW1000_CHANNEL_7
+#define TRUE_RANGE  0.5f
+#define DW1000_CAL_PRF DW1000_PRF_64MHZ
+#define MAX_CAL_SAMPLES 1000
 enum trip_statuses {
     TRIP_START,
     TRIP_REPLY,
@@ -61,3 +66,7 @@ void parse_ranging_pkt(struct ds_twr_data_s *pkt, uint8_t receive_node_id,
 void send_ranging_pkt(struct ds_twr_data_s *pkt, uint8_t *target_node_id, 
     uint64_t transmit_tstamp);
 void setup_next_trip(uint8_t *slot_map, uint8_t num_online);
+bool push_calib_data(float range, uint8_t id1, uint8_t id2);
+float get_result(uint8_t id);
+float get_sample_dat(uint8_t id1, uint8_t id2);
+uint16_t get_sample_count(uint8_t id1, uint8_t id2);

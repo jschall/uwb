@@ -39,7 +39,7 @@ PARAM_DEFINE_UINT16_PARAM_STATIC(param_g, "g", 7, 7, 7)
 PARAM_DEFINE_STRING_PARAM_STATIC(param_j, "j", "blah", 128)
 PARAM_DEFINE_BOOL_PARAM_STATIC(param_i, "i", true)
 */
-PARAM_DEFINE_UINT8_PARAM_STATIC(tdma_unit_type, "TDMA_UTYPE", 0, 0, 2)
+PARAM_DEFINE_UINT8_PARAM_STATIC(tdma_unit_type, "TDMA_UTYPE", 2, 0, 2)
 
 int main(void) {
     halInit();
@@ -51,17 +51,20 @@ int main(void) {
 
     uint8_t unique_id[12];
     board_get_unique_id(unique_id, sizeof(unique_id));
-    if (unique_id[10] == 0x4A) { // we are tdma supervisor
+    //if (unique_id[10] == 0x4A) { // we are tdma supervisor
+#if MODULE_TYPE == MODULE_TYPE_SUPER
         tdma_init(unique_id[10], TDMA_SUPERVISOR);
         tdma_supervisor_run();
         tdma_unit_type = 1;
-    } else if (tdma_unit_type == 0){
+#elif MODULE_TYPE == MODULE_TYPE_SUB
+    //} else if (tdma_unit_type == 0){
         tdma_init(unique_id[10], TDMA_SUBORDINATE);
         tdma_subordinate_run();
-    } else {
+#else//} else {
         tdma_init(unique_id[10], TDMA_SNIFFER);
         tdma_sniffer_run();
-    }
+    //}
+#endif
 
     return 0;
 }
