@@ -43,8 +43,6 @@ static void status_topic_handler(size_t msg_size, const void* buf, void* ctx) {
 }
 
 int main(void) {
-    uavcan_set_node_id(0, 42);
-
     struct pubsub_topic_s* status_topic = uavcan_get_message_topic(0, &uavcan_protocol_NodeStatus_descriptor);
     struct pubsub_listener_s status_listener;
     pubsub_init_and_register_listener(status_topic, &status_listener);
