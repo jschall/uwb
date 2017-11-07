@@ -26,6 +26,8 @@
 #include <uavcan/uavcan.h>
 #include "uavcan_node.h"
 
+#include <lpwork_thread/lpwork_thread.h>
+
 #include <uavcan.protocol.NodeStatus.h>
 #include <uavcan.protocol.debug.LogMessage.h>
 
@@ -38,6 +40,22 @@ static void status_topic_handler(size_t msg_size, const void* buf, void* ctx) {
     log_message.level.value = UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG;
     log_message.source_len = 0;
     sprintf((char*)log_message.text, "%u %u %u %u %u %u", wrapper->source_node_id, (unsigned int)msg->uptime_sec, msg->health, msg->mode, msg->sub_mode, msg->vendor_specific_status_code);
+    log_message.text_len = strlen((char*)log_message.text);
+//     uavcan_broadcast(0, &uavcan_protocol_debug_LogMessage_descriptor, CANARD_TRANSFER_PRIORITY_LOW, &log_message);
+}
+
+static void send_node_status_message(void* ctx) {
+    struct uavcan_protocol_NodeStatus_s* msg = ctx;
+    msg->uptime_sec++;
+    uavcan_broadcast(0, &uavcan_protocol_NodeStatus_descriptor, CANARD_TRANSFER_PRIORITY_LOW, msg);
+}
+
+static void print_task_func(void* ctx) {
+    char* msg_str = ctx;
+    struct uavcan_protocol_debug_LogMessage_s log_message;
+    log_message.level.value = UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG;
+    log_message.source_len = 0;
+    strcpy((char*)log_message.text, msg_str);
     log_message.text_len = strlen((char*)log_message.text);
     uavcan_broadcast(0, &uavcan_protocol_debug_LogMessage_descriptor, CANARD_TRANSFER_PRIORITY_LOW, &log_message);
 }
@@ -55,11 +73,13 @@ int main(void) {
     node_status.sub_mode = 0;
     node_status.vendor_specific_status_code = 0;
 
-    while(true) {
-        node_status.uptime_sec++;
-        uavcan_broadcast(0, &uavcan_protocol_NodeStatus_descriptor, CANARD_TRANSFER_PRIORITY_LOW, &node_status);
-        pubsub_listener_handle_until_timeout(&status_listener, MS2ST(1000));
-    }
+    struct worker_thread_timer_task_s node_status_send_task, fast_task, slow_task;
+    worker_thread_add_timer_task(&lpwork_thread, &node_status_send_task, send_node_status_message, &node_status, S2ST(1), true);
+
+    worker_thread_add_timer_task(&lpwork_thread, &fast_task, print_task_func, "fast", MS2ST(500), true);
+    worker_thread_add_timer_task(&lpwork_thread, &slow_task, print_task_func, "slow", MS2ST(1000), true);
+
+    pubsub_listener_handle_until_timeout(&status_listener, TIME_INFINITE);
 
     return 0;
 }
