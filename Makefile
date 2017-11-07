@@ -7,9 +7,7 @@ MODULES_ENABLED = chibios_sys_init chibios_hal_init pubsub param uavcan flash dw
 
 MESSAGES_ENABLED = uavcan.protocol.NodeStatus uavcan.protocol.debug.LogMessage uavcan.protocol.dynamic_node_id.Allocation
 
-include omd_common/include.mk
+-include omd_common/include.mk
 
-.PHONY: update_submodules
-PRE_BUILD_RULE: update_submodules
-update_submodules:
+omd_common/include.mk:
 	git submodule init && git submodule update
