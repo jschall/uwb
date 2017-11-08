@@ -60,6 +60,17 @@ static void print_task_func(void* ctx) {
     uavcan_broadcast(0, &uavcan_protocol_debug_LogMessage_descriptor, CANARD_TRANSFER_PRIORITY_LOW, &log_message);
 }
 
+PARAM_DEFINE_FLOAT32_PARAM_STATIC(param_a, "a", 4, 3, 5)
+PARAM_DEFINE_INT64_PARAM_STATIC(param_b, "b", 7, 7, 7)
+PARAM_DEFINE_INT32_PARAM_STATIC(param_c, "c", 7, 7, 7)
+PARAM_DEFINE_INT16_PARAM_STATIC(param_d, "d", 7, 7, 7)
+PARAM_DEFINE_INT8_PARAM_STATIC(param_e, "e", 7, 7, 7)
+PARAM_DEFINE_UINT32_PARAM_STATIC(param_f, "f", 7, 7, 7)
+PARAM_DEFINE_UINT16_PARAM_STATIC(param_g, "g", 7, 7, 7)
+PARAM_DEFINE_UINT8_PARAM_STATIC(param_h, "h", 7, 7, 7)
+PARAM_DEFINE_STRING_PARAM_STATIC(param_j, "j", "blah", 128)
+PARAM_DEFINE_BOOL_PARAM_STATIC(param_i, "i", true)
+
 int main(void) {
     struct pubsub_topic_s* status_topic = uavcan_get_message_topic(0, &uavcan_protocol_NodeStatus_descriptor);
     struct pubsub_listener_s status_listener;
