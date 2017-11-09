@@ -77,6 +77,7 @@ int main(void) {
     halInit();
     chSysInit();
     timing_init();
+    param_init();
 
     uavcan_node_init();
 

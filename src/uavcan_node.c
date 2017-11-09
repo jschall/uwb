@@ -27,8 +27,6 @@ static THD_FUNCTION(UavcanNodeThread, arg) {
     shared_msg_valid = shared_msg_check_and_retreive(&shared_msgid, &shared_msg);
     shared_msg_clear();
 
-    param_init();
-
     begin_canbus_autobaud();
     while(true) {
         update_canbus_autobaud();
