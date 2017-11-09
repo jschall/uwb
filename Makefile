@@ -5,7 +5,7 @@
 
 # Compiler options here.
 ifeq ($(USE_OPT),)
-  USE_OPT = -Os -ggdb --specs=nosys.specs -std=gnu99 -lnosys -lm -DGIT_HASH=0x$(shell git rev-parse --short=8 HEAD) -D"CANARD_ASSERT(x)"="{}" -ffast-math
+  USE_OPT = -O1 -ggdb --specs=nano.specs -std=gnu99 -lnosys -lm -DGIT_HASH=0x$(shell git rev-parse --short=8 HEAD) -D"CANARD_ASSERT(x)"="{}" -ffast-math
 endif
 
 # C specific options here (added to USE_OPT).
@@ -30,7 +30,7 @@ endif
 
 # Enable this if you want link time optimizations (LTO)
 ifeq ($(USE_LTO),)
-  USE_LTO = yes
+  USE_LTO = no
 endif
 
 # If enabled, this option allows to compile the application in THUMB mode.
