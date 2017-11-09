@@ -39,19 +39,19 @@ static void status_topic_handler(size_t msg_size, const void* buf, void* ctx) {
     struct uavcan_protocol_debug_LogMessage_s log_message;
     log_message.level.value = UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG;
     log_message.source_len = 0;
-    sprintf((char*)log_message.text, "%u %u %u %u %u %u", wrapper->source_node_id, (unsigned int)msg->uptime_sec, msg->health, msg->mode, msg->sub_mode, msg->vendor_specific_status_code);
+//     sprintf((char*)log_message.text, "%u %u %u %u %u %u", wrapper->source_node_id, (unsigned int)msg->uptime_sec, msg->health, msg->mode, msg->sub_mode, msg->vendor_specific_status_code);
     log_message.text_len = strlen((char*)log_message.text);
-//     uavcan_broadcast(0, &uavcan_protocol_debug_LogMessage_descriptor, CANARD_TRANSFER_PRIORITY_LOW, &log_message);
+    uavcan_broadcast(0, &uavcan_protocol_debug_LogMessage_descriptor, CANARD_TRANSFER_PRIORITY_LOW, &log_message);
 }
 
-static void send_node_status_message(void* ctx) {
-    struct uavcan_protocol_NodeStatus_s* msg = ctx;
+static void send_node_status_message(struct worker_thread_timer_task_s* task) {
+    struct uavcan_protocol_NodeStatus_s* msg = worker_thread_task_get_user_context(task);
     msg->uptime_sec++;
     uavcan_broadcast(0, &uavcan_protocol_NodeStatus_descriptor, CANARD_TRANSFER_PRIORITY_LOW, msg);
 }
 
-static void print_task_func(void* ctx) {
-    char* msg_str = ctx;
+static void print_task_func(struct worker_thread_timer_task_s* task) {
+    char* msg_str = worker_thread_task_get_user_context(task);
     struct uavcan_protocol_debug_LogMessage_s log_message;
     log_message.level.value = UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG;
     log_message.source_len = 0;
@@ -74,8 +74,7 @@ PARAM_DEFINE_BOOL_PARAM_STATIC(param_i, "i", true)
 int main(void) {
     struct pubsub_topic_s* status_topic = uavcan_get_message_topic(0, &uavcan_protocol_NodeStatus_descriptor);
     struct pubsub_listener_s status_listener;
-    pubsub_init_and_register_listener(status_topic, &status_listener);
-    pubsub_listener_set_handler_cb(&status_listener, status_topic_handler, NULL);
+    pubsub_init_and_register_listener(status_topic, &status_listener, status_topic_handler, NULL);
 
     struct uavcan_protocol_NodeStatus_s node_status;
     node_status.uptime_sec = 0;
