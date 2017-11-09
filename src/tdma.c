@@ -11,6 +11,7 @@ static char print_dat[100];
 static float prev_rx_tstamp;
 //maintains list of slot to node id map
 uint8_t slot_id_list[MAX_NUM_DEVICES];
+uint8_t ranging_id_list[MAX_NUM_DEVICES];
 static bool start_sent;
 static uint64_t last_tx_stamp;
 static uint64_t slot_start_timestamp;
@@ -22,23 +23,24 @@ static uint64_t slot_start_timestamp;
 
 #define DEBUG_PRINT  1
 
-void tdma_init(uint8_t unique_id, uint8_t unit_type)
+void tdma_init(uint8_t unit_type, struct tx_spec_s _tx_spec)
 {
     tdma_spec.slot_size = SLOT_SIZE;
     tdma_spec.num_tx_online = 0;
     tdma_spec.res_data_slot = 0;
     tdma_spec.req_node_id = 0;
     tdma_spec.cnt = 0;
-    tx_spec.node_id = unique_id;
-    tx_spec.type = STATIC_TAG;
-    tx_spec.pkt_cnt = 0;
-    tx_spec.data_slot_id = 255;
+    memcpy(&tx_spec, &_tx_spec, sizeof(tx_spec));
     curr_slot = START_SLOT;
     start_sent = false;
     memset(slot_id_list, 0, sizeof(slot_id_list));
+    memset(ranging_id_list, 0, sizeof(ranging_id_list));
     if (unit_type == TDMA_SUPERVISOR) {
-        twr_init(unique_id, 0);
+        twr_init(tx_spec.node_id, 0);
     }
+    dw1000_init(&uwb_instance, 3, BOARD_PAL_LINE_SPI3_UWB_CS, BOARD_PAL_LINE_UWB_NRST, tx_spec.ant_delay);
+    dw1000_rx_enable(&uwb_instance);
+    
 }
 
 /*
@@ -46,8 +48,6 @@ void tdma_init(uint8_t unique_id, uint8_t unit_type)
     Supervisor Runner
 
 */
-#if MODULE_TYPE == MODULE_TYPE_SUPER
-
 static void super_update_start_slot()
 {
     struct message_spec_s msg;
@@ -60,8 +60,8 @@ static void super_update_start_slot()
     msg.target_node_id = 0; //Reset Target Node ID
     dw1000_disable_transceiver(&uwb_instance);
     uint64_t scheduled_time = (dw1000_get_sys_time(&uwb_instance)+ARB_TIME_SYS_TICKS)&0xFFFFFFFFFFFFFE00ULL;
-    setup_next_trip(slot_id_list, tdma_spec.num_tx_online);
-    send_ranging_pkt(&msg.ds_twr_data, &msg.target_node_id, scheduled_time + dw1000_get_ant_delay(&uwb_instance));
+    setup_next_trip(ranging_id_list, tdma_spec.num_tx_online);
+    send_ranging_pkt(&msg.ds_twr_data, &msg.target_node_id, scheduled_time + tx_spec.ant_delay);
     dw1000_scheduled_transmit(&uwb_instance, scheduled_time, sizeof(msg), &msg, false);
     dw1000_rx_enable(&uwb_instance);
 }
@@ -90,9 +90,16 @@ static void handle_request_slot()
             //We only support upto MAX_NUM_DEVICES Devices
             return;
         }
+
         tdma_spec.num_tx_online++;
         tdma_spec.req_node_id = msg.tx_spec.node_id;
         tdma_spec.res_data_slot = tdma_spec.num_tx_online;
+        
+        if ((tx_spec.type == TAG && msg.tx_spec.type == ANCHOR) || 
+            (tx_spec.type == ANCHOR && msg.tx_spec.type == ANCHOR && 
+                tx_spec.ant_delay_cal && msg.tx_spec.ant_delay_cal)) {
+            ranging_id_list[tdma_spec.res_data_slot] = msg.tx_spec.node_id; 
+        }
         //record allocated slot id
         slot_id_list[tdma_spec.res_data_slot] = msg.tx_spec.node_id;
         uavcan_acquire();
@@ -141,8 +148,6 @@ static void update_curr_slot()
 
 void tdma_supervisor_run()
 {
-    dw1000_init(&uwb_instance, 3, BOARD_PAL_LINE_SPI3_UWB_CS, BOARD_PAL_LINE_UWB_NRST);
-    dw1000_rx_enable(&uwb_instance);
     uint16_t cnt = 0;
     tx_spec.data_slot_id = 0;
     while (true) {
@@ -172,7 +177,7 @@ void tdma_supervisor_run()
         }*/
     }
 }
-#endif
+
 
 /*
 
@@ -180,7 +185,7 @@ void tdma_supervisor_run()
 
 */
 
-#if MODULE_TYPE == MODULE_TYPE_SUB
+
 static void req_data_slot(struct dw1000_rx_frame_info_s rx_info)
 {
     struct message_spec_s msg;
@@ -193,7 +198,7 @@ static void req_data_slot(struct dw1000_rx_frame_info_s rx_info)
     dw1000_disable_transceiver(&uwb_instance);
     if(dw1000_scheduled_transmit(&uwb_instance, scheduled_time, sizeof(msg), &msg, false)) {
         uavcan_acquire();
-        sprintf(print_dat, "Requesting Data Slot @ %d for %x", tdma_spec.num_tx_online+1, tx_spec.node_id);
+        sprintf(print_dat, "Requesting Data Slot @ %u for %x", tdma_spec.num_tx_online+1, tx_spec.node_id);
         uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "Sub: ", print_dat);
         uavcan_release();
     } else {
@@ -211,11 +216,16 @@ static void update_subordinate()
     struct dw1000_rx_frame_info_s rx_info = dw1000_receive(&uwb_instance, sizeof(msg), &msg);
     static bool transmit_scheduled = false;
     if(rx_info.err_code == DW1000_RX_ERROR_NONE) {
-        slot_id_list[msg.tx_spec.data_slot_id] = msg.tx_spec.node_id;
+        //update ranging list
+        if ((tx_spec.type == TAG && msg.tx_spec.type == ANCHOR) || 
+            (tx_spec.type == ANCHOR && msg.tx_spec.type == ANCHOR && 
+                tx_spec.ant_delay_cal && msg.tx_spec.ant_delay_cal)) {
+            ranging_id_list[tdma_spec.res_data_slot] = msg.tx_spec.node_id; 
+        }
         if(msg.tx_spec.data_slot_id == 0) { //this is a message from supervisor
             transmit_scheduled = false;
             //Also setup ranging request of our own
-            setup_next_trip(slot_id_list, tdma_spec.num_tx_online);
+            setup_next_trip(ranging_id_list, tdma_spec.num_tx_online);
             slot_start_timestamp = rx_info.timestamp;
             tdma_spec = msg.tdma_spec;
             //check if it's our turn to ask for data slot, if yes request
@@ -228,12 +238,8 @@ static void update_subordinate()
                 data_slot_allocated = true;
                 twr_init(tx_spec.node_id, tx_spec.data_slot_id);
             }
-        } /*else {
-            //***Handle message Here****
-            if (msg.tx_spec.data_slot_id > tx_spec.data_slot_id) {
-                slot_id_list[msg.tx_spec.data_slot_id - tx_spec.data_slot_id] = msg.tx_spec.node_id;
-            }
-        }*/
+        }
+
         if(!data_slot_allocated) {
             return;
         }
@@ -251,7 +257,7 @@ static void update_subordinate()
             msg.tdma_spec = tdma_spec;
             msg.tx_spec = tx_spec;
             msg.target_node_id = 0; // reset target node id
-            send_ranging_pkt(&msg.ds_twr_data, &msg.target_node_id, scheduled_time + dw1000_get_ant_delay(&uwb_instance));
+            send_ranging_pkt(&msg.ds_twr_data, &msg.target_node_id, scheduled_time + tx_spec.ant_delay);
             if (dw1000_scheduled_transmit(&uwb_instance, scheduled_time, sizeof(msg), &msg, true)) {
                 tx_spec.pkt_cnt++;
             }
@@ -262,8 +268,6 @@ static void update_subordinate()
 
 void tdma_subordinate_run()
 {
-    dw1000_init(&uwb_instance, 3, BOARD_PAL_LINE_SPI3_UWB_CS, BOARD_PAL_LINE_UWB_NRST);
-    dw1000_rx_enable(&uwb_instance);
     uint16_t cnt = 0;
 
     while (true) {
@@ -279,17 +283,17 @@ void tdma_subordinate_run()
         chThdSleepMicroseconds(SLOT_SIZE/4);
     }
 }
-#endif
+
 /*
 
     TDMA Sniffer Runner
 
 */
-#if MODULE_TYPE == MODULE_TYPE_SNIFFER
+
 static bool sample_collected = false;
 static void print_tdma_spec()
 {
-    sprintf(print_dat,"ONLINE: %d REQ_NID: %x CNT: %d", tdma_spec.num_tx_online, tdma_spec.req_node_id , tdma_spec.cnt);
+    sprintf(print_dat,"ONLINE: %u REQ_NID: %x CNT: %lu", tdma_spec.num_tx_online, tdma_spec.req_node_id , tdma_spec.cnt);
     uavcan_acquire();
     uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "TDMA", print_dat);
     uavcan_release();
@@ -313,19 +317,19 @@ static void print_twr(struct ds_twr_data_s twr)
                 id2 = i;
             }
         }
-        sprintf(print_dat,"Sample Cnt: %d DeviceA: %x DeviceB: %x Dist: %f/%f", get_sample_count(id1, id2), twr.deviceA, twr.deviceB, twr.tprop, get_sample_dat(id1,id2));
+        sprintf(print_dat,"Sample Cnt: %lu DeviceA: %x DeviceB: %x Dist: %lu/%lu", get_sample_count(id1, id2), twr.deviceA, twr.deviceB, (uint32_t)(twr.tprop*1000), (uint32_t)(get_sample_dat(id1,id2)));
         uavcan_acquire();
         uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "TWR", print_dat);
         uavcan_release();
         if(sample_collected) {
             uavcan_acquire();
-            sprintf(print_dat, " D0x%x: %f/%d D0x%x: %f/%d D0x%x: %f/%d",
+            sprintf(print_dat, " D0x%x: %lu/%u D0x%x: %lu/%lu D0x%x: %lu/%lu",
              /*get_sample_dat(0,1), get_sample_dat(0,2), get_sample_dat(1,0), get_sample_dat(1,2),
              get_sample_dat(2,0), get_sample_dat(2,1),*/
              cal_node_id_list[0],
-             get_result(0),(uint32_t)(get_result(0)*METERS_TO_TIME), cal_node_id_list[1],
-             get_result(1), (uint32_t)(get_result(1)*METERS_TO_TIME), cal_node_id_list[2],
-             get_result(2), (uint32_t)(get_result(2)*METERS_TO_TIME));
+             (uint32_t)get_result(0),(uint32_t)(get_result(0)*METERS_TO_TIME), cal_node_id_list[1],
+             (uint32_t)get_result(1), (uint32_t)(get_result(1)*METERS_TO_TIME), cal_node_id_list[2],
+             (uint32_t)get_result(2), (uint32_t)(get_result(2)*METERS_TO_TIME));
             uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "TWR", print_dat);
             uavcan_release();
         }
@@ -384,8 +388,6 @@ static void print_info(struct message_spec_s msg, struct dw1000_rx_frame_info_s 
 
 void tdma_sniffer_run()
 {
-    dw1000_init(&uwb_instance, 3, BOARD_PAL_LINE_SPI3_UWB_CS, BOARD_PAL_LINE_UWB_NRST);
-    dw1000_rx_enable(&uwb_instance);
     struct message_spec_s msg;
     uint32_t cnt = 0;
     curr_slot = 0;
@@ -405,4 +407,4 @@ void tdma_sniffer_run()
         chThdSleepMicroseconds(SLOT_SIZE/4);
     }
 }
-#endif
+

@@ -28,11 +28,6 @@
 #define ARB_TIME_SYS_TICKS ((uint64_t)(ARB_TIME*UWB_SYS_TICKS))
 #define DW1000_SID2ST(x) ((uint64_t)(((x)*(UWB_SYS_TICKS*SLOT_SIZE))))
 
-#define MODULE_TYPE_SUPER   0
-#define MODULE_TYPE_SUB     1
-#define MODULE_TYPE_SNIFFER 2
-
-#define MODULE_TYPE MODULE_TYPE_SNIFFER
 
 enum tdma_slots {
     START_SLOT,
@@ -41,13 +36,12 @@ enum tdma_slots {
 };
 
 enum tx_types {
-    MOBILE_ANCHOR,
-    MOBILE_TAG,
-    STATIC_TAG
+    ANCHOR = 0,
+    TAG,
 };
 
 enum tdma_types {
-    TDMA_SUPERVISOR,
+    TDMA_SUPERVISOR = 0,
     TDMA_SUBORDINATE,
     TDMA_SNIFFER
 };
@@ -63,6 +57,8 @@ struct tdma_spec_s {
 struct tx_spec_s {
     uint8_t type;
     uint8_t node_id;
+    uint8_t ant_delay_cal;
+    uint32_t ant_delay;
     uint32_t pkt_cnt;
     uint8_t data_slot_id;
 };
@@ -75,11 +71,7 @@ struct message_spec_s {
 };
 
 
-void tdma_init(uint8_t unique_id, uint8_t unit_type);
-#if MODULE_TYPE == MODULE_TYPE_SUPER
-void tdma_supervisor_run();
-#elif MODULE_TYPE == MODULE_TYPE_SUB 
-void tdma_subordinate_run();
-#else
-void tdma_sniffer_run();
-#endif
+void tdma_init(uint8_t unit_type, struct tx_spec_s tx_spec);
+void tdma_supervisor_run(void);
+void tdma_subordinate_run(void);
+void tdma_sniffer_run(void);
