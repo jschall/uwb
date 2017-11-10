@@ -14,19 +14,8 @@
  *    limitations under the License.
  */
 
-#include "ch.h"
-#include "hal.h"
-#include <timing/timing.h>
-#include <common/helpers.h>
-#include <dw1000/dw1000.h>
-#include <string.h>
-#include <stdio.h>
-#include <math.h>
+#include <ch.h>
 #include <param/param.h>
-#include <uavcan/uavcan.h>
-#include "uavcan_node.h"
-
-#include <lpwork_thread/lpwork_thread.h>
 
 PARAM_DEFINE_FLOAT32_PARAM_STATIC(param_a, "a", 4, 3, 5)
 PARAM_DEFINE_INT64_PARAM_STATIC(param_b, "b", 7, 7, 7)
