@@ -15,7 +15,7 @@
  */
 
 #include <ch.h>
-#include <param/param.h>
+#include <modules/param/param.h>
 
 PARAM_DEFINE_FLOAT32_PARAM_STATIC(param_a, "a", 4, 3, 5)
 PARAM_DEFINE_INT64_PARAM_STATIC(param_b, "b", 7, 7, 7)
