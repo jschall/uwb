@@ -317,7 +317,7 @@ static void print_twr(struct ds_twr_data_s twr)
                 id2 = i;
             }
         }
-        sprintf(print_dat,"Sample Cnt: %lu DeviceA: %x DeviceB: %x Dist: %lu/%lu", get_sample_count(id1, id2), twr.deviceA, twr.deviceB, (uint32_t)(twr.tprop*1000), (uint32_t)(get_sample_dat(id1,id2)));
+        sprintf(print_dat,"Sample Cnt: %lu DeviceA: %x DeviceB: %x Dist: %ld/%ld", get_sample_count(id1, id2), twr.deviceA, twr.deviceB, (int32_t)(twr.tprop*1000.0f), (int32_t)(get_sample_dat(id1,id2)*1000.0f));
         uavcan_acquire();
         uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "TWR", print_dat);
         uavcan_release();
@@ -327,9 +327,9 @@ static void print_twr(struct ds_twr_data_s twr)
              /*get_sample_dat(0,1), get_sample_dat(0,2), get_sample_dat(1,0), get_sample_dat(1,2),
              get_sample_dat(2,0), get_sample_dat(2,1),*/
              cal_node_id_list[0],
-             (uint32_t)get_result(0),(uint32_t)(get_result(0)*METERS_TO_TIME), cal_node_id_list[1],
-             (uint32_t)get_result(1), (uint32_t)(get_result(1)*METERS_TO_TIME), cal_node_id_list[2],
-             (uint32_t)get_result(2), (uint32_t)(get_result(2)*METERS_TO_TIME));
+             (uint32_t)get_result(0)/2,(uint32_t)(get_result(0)*METERS_TO_TIME/2.0f), cal_node_id_list[1],
+             (uint32_t)get_result(1)/2, (uint32_t)(get_result(1)*METERS_TO_TIME/2.0f), cal_node_id_list[2],
+             (uint32_t)get_result(2)/2, (uint32_t)(get_result(2)*METERS_TO_TIME/2.0f));
             uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "TWR", print_dat);
             uavcan_release();
         }
