@@ -24,7 +24,7 @@
     and publish it on the network.
 */
 #pragma once
-#include <common/timing.h>
+#include <timing/timing.h>
 #include <string.h>
 #include <stdio.h>
 #include <math.h>

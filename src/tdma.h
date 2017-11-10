@@ -1,16 +1,16 @@
 #pragma once
 #include "ch.h"
 #include "hal.h"
-#include <common/timing.h>
+#include <timing/timing.h>
 #include <common/helpers.h>
-#include "dw1000.h"
+#include <dw1000/dw1000.h>
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
-#include <common/param.h>
-#include <common/uavcan.h>
-#include "uavcan_node.h"
+#include <param/param.h>
+#include <uavcan/uavcan.h>
 #include "twr.h"
+#include <uavcan_debug/uavcan_debug.h>
 //TODO: Convert these to parameter
 #define MAX_HEADER_SIZE 93
 #define TX_RATE 6800000

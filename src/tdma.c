@@ -21,7 +21,7 @@ static uint64_t slot_start_timestamp;
 
 */
 
-#define DEBUG_PRINT  1
+#define DEBUG_PRINT  0
 
 void tdma_init(uint8_t unit_type, struct tx_spec_s _tx_spec)
 {
@@ -77,11 +77,8 @@ static void handle_request_slot()
                 tdma_spec.req_node_id = msg.tx_spec.node_id;
                 tdma_spec.res_data_slot = i + 1;
 #ifdef DEBUG_PRINT
-                uavcan_acquire();
-                sprintf(print_dat,"Repeat Slot: NID:%x TX_TSTAMP: %f PREV_MSG: %f THIS_MSG:%f", \
+                uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Super: ", "Repeat Slot: NID:%x TX_TSTAMP: %f PREV_MSG: %f THIS_MSG:%f", \
                     msg.tx_spec.node_id, dw1000_get_tx_stamp(&uwb_instance)/UWB_SYS_TICKS, prev_rx_tstamp, rx_info.timestamp/UWB_SYS_TICKS);
-                uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "Super: ", print_dat);
-                uavcan_release();
 #endif
                 return;
             }
@@ -102,9 +99,7 @@ static void handle_request_slot()
         }
         //record allocated slot id
         slot_id_list[tdma_spec.res_data_slot] = msg.tx_spec.node_id;
-        uavcan_acquire();
-        uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "Super: ", "New Node Discovered");
-        uavcan_release();
+        uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Super: ", "New Node Discovered");
     }
 }
 
@@ -121,11 +116,8 @@ static void update_data_slot(bool supervisor)
         }
 #ifdef DEBUG_PRINT
         if(msg.target_node_id == 255) {
-            uavcan_acquire();
-            sprintf(print_dat,"Wrong Request: NID:%x TX_TSTAMP: %f PREV_MSG: %f THIS_MSG:%f", \
+            uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Super: ", "Wrong Request: NID:%x TX_TSTAMP: %f PREV_MSG: %f THIS_MSG:%f", \
                 msg.tx_spec.node_id, dw1000_get_tx_stamp(&uwb_instance)/UWB_SYS_TICKS, prev_rx_tstamp, rx_info.timestamp/UWB_SYS_TICKS);
-            uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "Super: ", print_dat);
-            uavcan_release();
         }
 #endif
     }
@@ -197,14 +189,9 @@ static void req_data_slot(struct dw1000_rx_frame_info_s rx_info)
 
     dw1000_disable_transceiver(&uwb_instance);
     if(dw1000_scheduled_transmit(&uwb_instance, scheduled_time, sizeof(msg), &msg, false)) {
-        uavcan_acquire();
-        sprintf(print_dat, "Requesting Data Slot @ %u for %x", tdma_spec.num_tx_online+1, tx_spec.node_id);
-        uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "Sub: ", print_dat);
-        uavcan_release();
+        uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Sub: ", "Requesting Data Slot @ %u for %x", tdma_spec.num_tx_online+1, tx_spec.node_id);
     } else {
-        uavcan_acquire();
-        uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "Sub: ", "Requesting Data Slot Failed");
-        uavcan_release();
+        uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Sub: ", "Requesting Data Slot Failed");
     }
     //Go and wait for time slot allocation
     dw1000_rx_enable(&uwb_instance);
@@ -293,10 +280,7 @@ void tdma_subordinate_run()
 static bool sample_collected = false;
 static void print_tdma_spec()
 {
-    sprintf(print_dat,"ONLINE: %u REQ_NID: %x CNT: %lu", tdma_spec.num_tx_online, tdma_spec.req_node_id , tdma_spec.cnt);
-    uavcan_acquire();
-    uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "TDMA", print_dat);
-    uavcan_release();
+    uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "TDMA", "ONLINE: %u REQ_NID: %x CNT: %lu", tdma_spec.num_tx_online, tdma_spec.req_node_id , tdma_spec.cnt);
 }
 
 static uint8_t cal_node_id_list[3] = {0};
@@ -317,21 +301,15 @@ static void print_twr(struct ds_twr_data_s twr)
                 id2 = i;
             }
         }
-        sprintf(print_dat,"Sample Cnt: %lu DeviceA: %x DeviceB: %x Dist: %ld/%ld", get_sample_count(id1, id2), twr.deviceA, twr.deviceB, (int32_t)(twr.tprop*1000.0f), (int32_t)(get_sample_dat(id1,id2)*1000.0f));
-        uavcan_acquire();
-        uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "TWR", print_dat);
-        uavcan_release();
+        uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "TWR", "Sample Cnt: %lu DeviceA: %x DeviceB: %x Dist: %ld/%ld", get_sample_count(id1, id2), twr.deviceA, twr.deviceB, (int32_t)(twr.tprop*1000.0f), (int32_t)(get_sample_dat(id1,id2)*1000.0f));
         if(sample_collected) {
-            uavcan_acquire();
-            sprintf(print_dat, " D0x%x: %lu/%u D0x%x: %lu/%lu D0x%x: %lu/%lu",
+            uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "TWR"," D0x%x: %lu/%u D0x%x: %lu/%lu D0x%x: %lu/%lu",
              /*get_sample_dat(0,1), get_sample_dat(0,2), get_sample_dat(1,0), get_sample_dat(1,2),
              get_sample_dat(2,0), get_sample_dat(2,1),*/
              cal_node_id_list[0],
              (uint32_t)get_result(0)/2,(uint32_t)(get_result(0)*METERS_TO_TIME/2.0f), cal_node_id_list[1],
              (uint32_t)get_result(1)/2, (uint32_t)(get_result(1)*METERS_TO_TIME/2.0f), cal_node_id_list[2],
              (uint32_t)get_result(2)/2, (uint32_t)(get_result(2)*METERS_TO_TIME/2.0f));
-            uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "TWR", print_dat);
-            uavcan_release();
         }
     }
 
