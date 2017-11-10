@@ -10,9 +10,3 @@
 #define BOARD_PAL_LINE_UWB_NRST PAL_LINE(GPIOA,0)
 #define BOARD_PAL_LINE_CAN_RX PAL_LINE(GPIOA,11)
 #define BOARD_PAL_LINE_CAN_TX PAL_LINE(GPIOA,12)
-
-void board_get_unique_id(uint8_t* buf, uint8_t len);
-
-#if !defined(_FROM_ASM_)
-void boardInit(void);
-#endif /* _FROM_ASM_ */
