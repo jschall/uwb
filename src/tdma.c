@@ -7,19 +7,18 @@ static uint8_t curr_slot;
 static bool data_slot_allocated;
 static struct tx_spec_s tx_spec;
 static bool send_log_now;
-static char print_dat[100];
 static float prev_rx_tstamp;
 //maintains list of slot to node id map
 uint8_t slot_id_list[MAX_NUM_DEVICES];
 uint8_t ranging_id_list[MAX_NUM_DEVICES];
 static bool start_sent;
-static uint64_t last_tx_stamp;
 static uint64_t slot_start_timestamp;
 /*
 
     Initialize TDMA vars
 
 */
+static void print_twr(struct ds_twr_data_s *twr);
 
 #define DEBUG_PRINT  0
 
@@ -48,7 +47,7 @@ void tdma_init(uint8_t unit_type, struct tx_spec_s _tx_spec)
     Supervisor Runner
 
 */
-static void super_update_start_slot()
+static void super_update_start_slot(void)
 {
     struct message_spec_s msg;
     tdma_spec.slot_size = SLOT_SIZE;
@@ -66,7 +65,7 @@ static void super_update_start_slot()
     dw1000_rx_enable(&uwb_instance);
 }
 
-static void handle_request_slot()
+static void handle_request_slot(void)
 {
     struct message_spec_s msg;
     struct dw1000_rx_frame_info_s rx_info = dw1000_receive(&uwb_instance, sizeof(msg), &msg);
@@ -103,8 +102,9 @@ static void handle_request_slot()
     }
 }
 
-static void update_data_slot(bool supervisor)
+static void update_data_slot()
 {
+    static uint32_t last_time;
     struct message_spec_s msg;
     //We shall receive a data packet sometime in the middle of this sleep
     struct dw1000_rx_frame_info_s rx_info = dw1000_receive(&uwb_instance, sizeof(msg), &msg);
@@ -114,6 +114,10 @@ static void update_data_slot(bool supervisor)
         if (msg.target_node_id == tx_spec.node_id) {
             parse_ranging_pkt(&msg.ds_twr_data, msg.tx_spec.node_id, rx_info.timestamp);
         }
+        /*if(millis() - last_time > 300) {
+            print_twr(&msg.ds_twr_data);
+            last_time = millis();
+        }*/
 #ifdef DEBUG_PRINT
         if(msg.target_node_id == 255) {
             uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Super: ", "Wrong Request: NID:%x TX_TSTAMP: %f PREV_MSG: %f THIS_MSG:%f", \
@@ -121,11 +125,10 @@ static void update_data_slot(bool supervisor)
         }
 #endif
     }
-
     dw1000_rx_enable(&uwb_instance);
 }
 
-static void update_curr_slot()
+static void update_curr_slot(void)
 {
     static uint64_t last_start_time;
     if (last_start_time == 0 || (micros() - last_start_time) >= ((tdma_spec.num_tx_online+2)*SLOT_SIZE)) {
@@ -138,7 +141,7 @@ static void update_curr_slot()
     }
 }
 
-void tdma_supervisor_run()
+void tdma_supervisor_run(void)
 {
     uint16_t cnt = 0;
     tx_spec.data_slot_id = 0;
@@ -151,7 +154,7 @@ void tdma_supervisor_run()
                 super_update_start_slot();
                 break;
             case DATA_SLOT:
-                update_data_slot(true);
+                update_data_slot();
                 break;
             case REQUEST_SLOT:
                 handle_request_slot();
@@ -197,7 +200,7 @@ static void req_data_slot(struct dw1000_rx_frame_info_s rx_info)
     dw1000_rx_enable(&uwb_instance);
 }
 
-static void update_subordinate()
+static void update_subordinate(void)
 {
     struct message_spec_s msg;
     struct dw1000_rx_frame_info_s rx_info = dw1000_receive(&uwb_instance, sizeof(msg), &msg);
@@ -255,7 +258,7 @@ static void update_subordinate()
     }
 }
 
-void tdma_subordinate_run()
+void tdma_subordinate_run(void)
 {
     uint16_t cnt = 0;
 
@@ -280,32 +283,39 @@ void tdma_subordinate_run()
 */
 
 static bool sample_collected = false;
-static void print_tdma_spec()
+static void print_tdma_spec(void)
 {
     uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "TDMA", "ONLINE: %u REQ_NID: %x CNT: %lu", tdma_spec.num_tx_online, tdma_spec.req_node_id , tdma_spec.cnt);
 }
 
-static uint8_t cal_node_id_list[3] = {0};
-static uint8_t num_cal_devices = 0;
-static void print_twr(struct ds_twr_data_s twr)
+static uint8_t cal_node_id_list[3];
+static void print_twr(struct ds_twr_data_s *twr)
 {
     //sprintf(print_dat, "TID: %d DeviceA: %x DeviceB: %x TSTAT: %d", twr.trip_id, twr.deviceA, twr.deviceB, twr.trip_status);
     //uavcan_acquire();
     //uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "TWR", print_dat);
     //uavcan_release();
-    if(twr.trip_status == DS_TWR_SOL) {
+    if(twr->trip_status == DS_TWR_SOL) {
         int8_t id1 = -1, id2 = -1;
         for (uint8_t i = 0; i < 3; i++) {
-            if (cal_node_id_list[i] == twr.deviceA) {
+            if (cal_node_id_list[i] == twr->deviceA) {
                 id1 = i;
             }
-            if (cal_node_id_list[i] == twr.deviceB) {
+            if (cal_node_id_list[i] == twr->deviceB) {
                 id2 = i;
             }
         }
-        uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "TWR", "Sample Cnt: %lu DeviceA: %x DeviceB: %x Dist: %ld/%ld", get_sample_count(id1, id2), twr.deviceA, twr.deviceB, (int32_t)(twr.tprop*1000.0f), (int32_t)(get_sample_dat(id1,id2)*1000.0f));
+        //uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "TWR", "TID: %d T1: %lu T2: %lu T3: %lu", twr->trip_id, 
+        //twr->transmit_tstamps[0], twr->transmit_tstamps[1], twr->transmit_tstamps[2]);
+        //uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "TWR", "TPROP: %f R1: %lu R2: %lu R3: %lu", twr->tprop,
+        //twr->receive_tstamps[0], twr->receive_tstamps[1], twr->receive_tstamps[2]);
+        //uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "TWR", "\n\n");
+        if(twr->tprop < 10.0f && twr->tprop > -10.0f) {
+            uavcan_send_debug_keyvalue("Range", twr->tprop*100.0f);
+        }
+        uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "TWR", "Sample Cnt: %lu DeviceA: %x DeviceB: %x Dist: %f", get_sample_count(id1, id2), twr->deviceA, twr->deviceB, twr->tprop);
         if(sample_collected) {
-            uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "TWR"," D0x%x: %lu/%u D0x%x: %lu/%lu D0x%x: %lu/%lu",
+            uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "TWR"," D0x%x: %lu/%lu D0x%x: %lu/%lu D0x%x: %lu/%lu",
              /*get_sample_dat(0,1), get_sample_dat(0,2), get_sample_dat(1,0), get_sample_dat(1,2),
              get_sample_dat(2,0), get_sample_dat(2,1),*/
              cal_node_id_list[0],
@@ -327,26 +337,32 @@ static void print_twr(struct ds_twr_data_s twr)
     uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "TWR", print_dat);
     uavcan_release();*/
 }
-static void process_twr(struct ds_twr_data_s twr, struct tx_spec_s tx_spec)
+static void process_twr(struct ds_twr_data_s *twr, struct tx_spec_s *tx_spec)
 {
-    if(tx_spec.data_slot_id < 3) {
+    static uint32_t last_time;
+    if(tx_spec->data_slot_id < 3) {
         sample_collected = false;
-        cal_node_id_list[tx_spec.data_slot_id] = tx_spec.node_id;
+        cal_node_id_list[tx_spec->data_slot_id] = tx_spec->node_id;
     }
-    if(twr.trip_status == DS_TWR_SOL) {
+    if(twr->trip_status == DS_TWR_SOL) {
         int8_t id1 = -1, id2 = -1;
         for (uint8_t i = 0; i < 3; i++) {
-            if (cal_node_id_list[i] == twr.deviceA) {
+            if (cal_node_id_list[i] == twr->deviceA) {
                 id1 = i;
             }
-            if (cal_node_id_list[i] == twr.deviceB) {
+            if (cal_node_id_list[i] == twr->deviceB) {
                 id2 = i;
             }
         }
         if (id1 != -1 && id2 != -1) {
-            if(push_calib_data(twr.tprop, id1, id2)) {
+            if(push_calib_data(twr->tprop, id1, id2)) {
                 sample_collected = true;
             }
+        }
+        //if(send_log_now) {
+        if ((millis() - last_time) > 300) {
+            print_twr(twr);
+            last_time = millis();
         }
     }
 }
@@ -357,29 +373,28 @@ static void print_info(struct message_spec_s msg, struct dw1000_rx_frame_info_s 
         return;
     }
     //print_tdma_spec();
-    /*sprintf(print_dat,"ONLINE:%d T: %.0f SLOT: %d NID: %x \nPKT_CNT: %d TX_SLOT: %d TNID: %d", \
+    //uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "TWR","ONLINE:%d T: %.0f SLOT: %d NID: %x \nPKT_CNT: %d TX_SLOT: %d TNID: %d", \
         msg.tdma_spec.num_tx_online, rx_info.timestamp/UWB_SYS_TICKS, curr_slot, msg.tx_spec.node_id, msg.tx_spec.pkt_cnt , \
         msg.tx_spec.data_slot_id, msg.target_node_id);
-    uavcan_acquire();
-    uavcan_send_debug_logmessage(UAVCAN_LOGLEVEL_DEBUG, "RX", print_dat);
-    uavcan_release();*/
-    print_twr(msg.ds_twr_data);
+
+    print_twr(&msg.ds_twr_data);
 }
 
-void tdma_sniffer_run()
+void tdma_sniffer_run(void)
 {
     struct message_spec_s msg;
     uint32_t cnt = 0;
     curr_slot = 0;
+    memset(cal_node_id_list, 0, sizeof(cal_node_id_list));
     while(true) {
         struct dw1000_rx_frame_info_s rx_info = dw1000_receive(&uwb_instance, sizeof(msg), &msg);
         if(rx_info.err_code == DW1000_RX_ERROR_NONE) {
             cnt++;
-            process_twr(msg.ds_twr_data, msg.tx_spec);
+            process_twr(&msg.ds_twr_data, &msg.tx_spec);
             tdma_spec = msg.tdma_spec;
-            print_info(msg, rx_info);
+            //print_info(msg, rx_info);
         }
-        if(cnt % 200 <= 20) {
+        if(cnt % 200 <= 10) {
             send_log_now = true;
         } else {
             send_log_now = false;

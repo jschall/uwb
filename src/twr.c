@@ -56,11 +56,11 @@ static void record_range_sol(struct ds_twr_data_s *pkt)
 
 static void do_ds_twr(struct ds_twr_data_s *pkt)
 {
-    float tround1 = TIME_TO_METERS*(float)(pkt->receive_tstamps[1] - pkt->transmit_tstamps[0]);
-    float treply1 = TIME_TO_METERS*(float)(pkt->transmit_tstamps[1] - pkt->receive_tstamps[0]);
-    float tround2 = TIME_TO_METERS*(float)(pkt->receive_tstamps[2] - pkt->transmit_tstamps[1]);
-    float treply2 = TIME_TO_METERS*(float)(pkt->transmit_tstamps[2] - pkt->receive_tstamps[1]);
-    pkt->tprop = (((tround1*tround2) - (treply1*treply2)) / (tround1+tround2+treply1+treply2));
+    double tround1 = TIME_TO_METERS*(double)dw1000_wrap_timestamp(pkt->receive_tstamps[1] - pkt->transmit_tstamps[0]);
+    double treply1 = TIME_TO_METERS*(double)dw1000_wrap_timestamp(pkt->transmit_tstamps[1] - pkt->receive_tstamps[0]);
+    double tround2 = TIME_TO_METERS*(double)dw1000_wrap_timestamp(pkt->receive_tstamps[2] - pkt->transmit_tstamps[1]);
+    double treply2 = TIME_TO_METERS*(double)dw1000_wrap_timestamp(pkt->transmit_tstamps[2] - pkt->receive_tstamps[1]);
+    pkt->tprop = (float)(((tround1*tround2) - (treply1*treply2)) / (tround1+tround2+treply1+treply2));
 }
 
 static void do_ss_twr(struct ds_twr_data_s *pkt)
@@ -70,7 +70,7 @@ static void do_ss_twr(struct ds_twr_data_s *pkt)
     pkt->tprop = (tround - treply)/2;
 }
 
-static void handle_pkt(uint8_t receive_node_id, uint64_t receive_tstamp, struct ds_twr_data_s *pkt)
+static void handle_pkt(uint8_t receive_node_id, int64_t receive_tstamp, struct ds_twr_data_s *pkt)
 {
     bool new_data = false;
     if(((buffer.tail + 1)%MAX_NUM_DEVICES) == buffer.head && pkt->trip_status != DS_TWR_SOL) {
@@ -184,14 +184,14 @@ void setup_next_trip(uint8_t *slot_map, uint8_t num_online)
 }
 
 void parse_ranging_pkt(struct ds_twr_data_s *pkt, uint8_t recieve_node_id, 
-    uint64_t receive_tstamp)
+    int64_t receive_tstamp)
 {
     //Check if we are interested in the packet
     handle_pkt(recieve_node_id, receive_tstamp, pkt);
 }
 
-void send_ranging_pkt(struct ds_twr_data_s *pkt, uint8_t *target_node_id, 
-    uint64_t transmit_tstamp)
+void send_ranging_pkt(struct ds_twr_data_s *pkt, uint16_t *target_node_id, 
+    int64_t transmit_tstamp)
 {
     //No data available
     memset(pkt, 0, sizeof(struct ds_twr_data_s));
@@ -235,7 +235,7 @@ bool push_calib_data(float range, uint8_t id1, uint8_t id2)
 {
     if (sample_count[id1][id2] != MAX_CAL_SAMPLES) {
         if(sample_count[id1][id2] > 0 && fabsf(range - calib_data[id1][id2]) > 10.0f) {
-            return;
+            return false;
         }
         calib_data[id1][id2] = calib_data[id1][id2]*sample_count[id1][id2] + range;
         sample_count[id1][id2]++;
@@ -269,7 +269,6 @@ float get_result(uint8_t id)
                 continue;
             }
             delta[i][j] = calib_data[i][j] - TRUE_RANGE;
-            delta[i][j] -= dw1000_get_range_bias(DW1000_CAL_CHAN_NUM, TRUE_RANGE, DW1000_CAL_PRF)/100.0f;
         }
     }
     result = (delta[id][(id+1)%3] + delta[(id+1)%3][id])/2;

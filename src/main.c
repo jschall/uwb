@@ -16,14 +16,14 @@
 
 #include "ch.h"
 #include "hal.h"
-#include <timing/timing.h>
+#include <modules/timing/timing.h>
 #include <common/helpers.h>
-#include <dw1000/dw1000.h>
+#include <modules/dw1000/dw1000.h>
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
-#include <param/param.h>
-#include <uavcan/uavcan.h>
+#include <modules/param/param.h>
+#include <modules/uavcan/uavcan.h>
 #include "tdma.h"
 #include <errno.h>
 

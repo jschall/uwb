@@ -24,16 +24,15 @@
     and publish it on the network.
 */
 #pragma once
-#include <timing/timing.h>
+#include <modules/timing/timing.h>
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
 #include <stdbool.h>
+#include <modules/dw1000/dw1000.h>
 
-#define TIME_TO_METERS 0.0046917639786159f
-#define METERS_TO_TIME 213.13945f
 #define DW1000_CAL_CHAN_NUM DW1000_CHANNEL_7
-#define TRUE_RANGE  0.5f
+#define TRUE_RANGE  0.3f
 #define DW1000_CAL_PRF DW1000_PRF_64MHZ
 #define MAX_CAL_SAMPLES 1000
 enum trip_statuses {
@@ -48,8 +47,8 @@ struct ds_twr_data_s {
     uint8_t deviceA;        //ID of trip instigator
     uint8_t deviceB;
     uint8_t trip_status;
-    uint64_t transmit_tstamps[3];
-    uint64_t receive_tstamps[3];
+    int64_t transmit_tstamps[3];
+    int64_t receive_tstamps[3];
     float tprop;    //this will be in meters
 };
 
@@ -62,9 +61,9 @@ struct range_sol_s {
 
 void twr_init(uint8_t _my_node_id, uint8_t _my_slot_id);
 void parse_ranging_pkt(struct ds_twr_data_s *pkt, uint8_t receive_node_id, 
-    uint64_t receive_tstamp);
-void send_ranging_pkt(struct ds_twr_data_s *pkt, uint8_t *target_node_id, 
-    uint64_t transmit_tstamp);
+    int64_t receive_tstamp);
+void send_ranging_pkt(struct ds_twr_data_s *pkt, uint16_t *target_node_id, 
+    int64_t transmit_tstamp);
 void setup_next_trip(uint8_t *slot_map, uint8_t num_online);
 bool push_calib_data(float range, uint8_t id1, uint8_t id2);
 float get_result(uint8_t id);
