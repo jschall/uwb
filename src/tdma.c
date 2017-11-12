@@ -207,7 +207,9 @@ static void update_subordinate()
         if ((tx_spec.type == TAG && msg.tx_spec.type == ANCHOR) || 
             (tx_spec.type == ANCHOR && msg.tx_spec.type == ANCHOR && 
                 tx_spec.ant_delay_cal && msg.tx_spec.ant_delay_cal)) {
-            ranging_id_list[tdma_spec.res_data_slot] = msg.tx_spec.node_id; 
+            if (msg.tx_spec.data_slot_id <= MAX_NUM_DEVICES) {
+                ranging_id_list[msg.tx_spec.data_slot_id] = msg.tx_spec.node_id; 
+            }
         }
         if(msg.tx_spec.data_slot_id == 0) { //this is a message from supervisor
             transmit_scheduled = false;
