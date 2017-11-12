@@ -1,4 +1,4 @@
 [submodule "omd_common"]
 	path = omd_common
-	url = https://github.com/bugobliterator/omd_common
+	url = https://github.com/bugobliterator/framework
 	branch = omd_uavcan-wip
