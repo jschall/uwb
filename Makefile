@@ -7,7 +7,4 @@ MODULES_ENABLED = chibios_sys_init chibios_hal_init pubsub param uavcan flash dw
 
 MESSAGES_ENABLED = uavcan.protocol.debug.LogMessage uavcan.protocol.GetNodeInfo
 
--include framework/include.mk
-
-framework/include.mk: PRE_BUILD_RULE
-	git submodule init && git submodule update
+include framework/include.mk
