@@ -14,9 +14,8 @@
 //TODO: Convert these to parameter
 #define MAX_HEADER_SIZE 93
 #define TX_RATE 6800000
-#define ARB_TIME ((SLOT_SIZE/3) + (SLOT_SIZE/10))
 
-#define SLOT_SIZE 2500ULL    //2.5ms
+#define SLOT_SIZE 4000ULL    //4ms
 #define TOTAL_AVAILABLE_SLOTS 10
 #define MAX_NUM_DEVICES TOTAL_AVAILABLE_SLOTS
 
@@ -25,6 +24,7 @@
 
 
 #define UWB_SYS_TICKS 63897.6f
+#define ARB_TIME SLOT_SIZE/2
 #define ARB_TIME_SYS_TICKS ((uint64_t)(ARB_TIME*UWB_SYS_TICKS))
 #define DW1000_SID2ST(x) ((uint64_t)(((x)*(UWB_SYS_TICKS*SLOT_SIZE))))
 
@@ -46,32 +46,46 @@ enum tdma_types {
     TDMA_SNIFFER
 };
 
-struct tdma_spec_s {
-    uint32_t slot_size;
-    uint32_t num_tx_online;
+struct __attribute__((packed)) tdma_spec_s {
+    uint8_t num_slots;
+    uint8_t tags_online;
+    uint8_t anchors_online;
     uint8_t res_data_slot;
     uint8_t req_node_id;
-    uint32_t cnt;
+    uint8_t cnt;
+    uint16_t slot_size;
 };
 
-struct tx_spec_s {
+struct __attribute__((packed)) tx_spec_s {
     uint8_t type;
     uint8_t node_id;
+    uint8_t data_slot_id;
     uint8_t ant_delay_cal;
     uint32_t ant_delay;
     uint32_t pkt_cnt;
-    uint8_t data_slot_id;
 };
 
-struct message_spec_s {
+#define MSG_HEADER_SIZE (sizeof(struct tdma_spec_s)+sizeof(struct tx_spec_s))
+#define MSG_PAYLOAD_SIZE(x) (x*sizeof(struct ds_twr_data_s))
+struct __attribute__((packed)) message_spec_s {
     struct tdma_spec_s tdma_spec;
     struct tx_spec_s tx_spec;
-    struct ds_twr_data_s ds_twr_data;
-    uint16_t target_node_id;
+    struct ds_twr_data_s ds_twr_data[MAX_NUM_DEVICES];
 };
 
+struct __attribute__((packed)) comm_request_pkt {
+    uint16_t magic;
+    uint8_t body_id;
+    uint8_t defer_slots;
+};
 
-void tdma_init(uint8_t unit_type, struct tx_spec_s tx_spec);
+struct __attribute__((packed)) comm_response_pkt {
+    uint16_t magic;
+    uint8_t body_id;
+    uint8_t defer_slots;
+};
+
+void tdma_init(uint8_t tx_type, struct tx_spec_s tx_spec);
 void tdma_supervisor_run(void);
 void tdma_subordinate_run(void);
 void tdma_sniffer_run(void);

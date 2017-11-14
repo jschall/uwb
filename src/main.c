@@ -39,8 +39,8 @@ PARAM_DEFINE_UINT16_PARAM_STATIC(param_g, "g", 7, 7, 7)
 PARAM_DEFINE_STRING_PARAM_STATIC(param_j, "j", "blah", 128)
 PARAM_DEFINE_BOOL_PARAM_STATIC(param_i, "i", true)
 */
-PARAM_DEFINE_UINT8_PARAM_STATIC(param_tdma_unit_type, "TDMA_UNIT_TYPE", TDMA_SUBORDINATE, 0, 2)
-PARAM_DEFINE_UINT8_PARAM_STATIC(param_tdma_tx_type, "TDMA_TX_TYPE", ANCHOR, 0, 1)
+PARAM_DEFINE_UINT8_PARAM_STATIC(param_tdma_unit_type, "TDMA_UNIT_TYPE", ANCHOR, 0, 1)
+PARAM_DEFINE_UINT8_PARAM_STATIC(param_tdma_tx_type, "TDMA_TX_TYPE", TDMA_SUPERVISOR, 0, 2)
 PARAM_DEFINE_UINT32_PARAM_STATIC(param_ant_delay, "ANTENNA_DELAY", 0, 0, UINT32_MAX)
 PARAM_DEFINE_BOOL_PARAM_STATIC(param_ant_delay_cal, "ANT_DELAY_CAL", false)
 PARAM_DEFINE_FLOAT32_PARAM_STATIC(param_anchor_pos_x, "ANCHOR_POS_X", 0.0f, -500.0f, 500.0f)
@@ -72,17 +72,17 @@ int main(void) {
     uint8_t unique_id[12];
     board_get_unique_id(unique_id, sizeof(unique_id));
     struct tx_spec_s tx_spec_init;
-    tx_spec_init.type = param_tdma_tx_type;
+    tx_spec_init.type = param_tdma_unit_type;
     tx_spec_init.node_id = unique_id[10];
     tx_spec_init.ant_delay_cal = param_ant_delay_cal;
     tx_spec_init.ant_delay = param_ant_delay;
     tx_spec_init.pkt_cnt = 0;
     tx_spec_init.data_slot_id = 255;
 
-    tdma_init(param_tdma_unit_type, tx_spec_init);
-    if (param_tdma_unit_type == TDMA_SUPERVISOR) { // we are tdma supervisor
+    tdma_init(param_tdma_tx_type, tx_spec_init);
+    if (param_tdma_tx_type == TDMA_SUPERVISOR) { // we are tdma supervisor
         tdma_supervisor_run();
-    } else if (param_tdma_unit_type == TDMA_SUBORDINATE) {
+    } else if (param_tdma_tx_type == TDMA_SUBORDINATE) {
         tdma_subordinate_run();
     } else {
         tdma_sniffer_run();

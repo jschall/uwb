@@ -35,17 +35,18 @@
 #define TRUE_RANGE  0.3f
 #define DW1000_CAL_PRF DW1000_PRF_64MHZ
 #define MAX_CAL_SAMPLES 1000
+struct message_spec_s;
 enum trip_statuses {
+    TRIP_INIT = 0,
     TRIP_START,
     TRIP_REPLY,
     SS_TWR_SOL,
-    DS_TWR_SOL
+    DS_TWR_SOL,
+    DS_TWR_SOL_RPT
 };
 
-struct ds_twr_data_s {
-    uint8_t trip_id;        //Id of the trip we are making
-    uint8_t deviceA;        //ID of trip instigator
-    uint8_t deviceB;
+struct __attribute__((packed)) ds_twr_data_s {
+    uint8_t trip_id;        //ID of the trip we are making
     uint8_t trip_status;
     int64_t transmit_tstamps[3];
     int64_t receive_tstamps[3];
@@ -60,12 +61,10 @@ struct range_sol_s {
 };
 
 void twr_init(uint8_t _my_node_id, uint8_t _my_slot_id);
-void parse_ranging_pkt(struct ds_twr_data_s *pkt, uint8_t receive_node_id, 
-    int64_t receive_tstamp);
-void send_ranging_pkt(struct ds_twr_data_s *pkt, uint16_t *target_node_id, 
-    int64_t transmit_tstamp);
-void setup_next_trip(uint8_t *slot_map, uint8_t num_online);
-bool push_calib_data(float range, uint8_t id1, uint8_t id2);
+void setup_ranging_pkt_for_tx(uint8_t num_online, int64_t transmit_tstamp, struct message_spec_s *msg);
+
 float get_result(uint8_t id);
 float get_sample_dat(uint8_t id1, uint8_t id2);
 uint16_t get_sample_count(uint8_t id1, uint8_t id2);
+
+#include "tdma.h"
