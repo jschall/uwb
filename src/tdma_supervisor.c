@@ -1,13 +1,11 @@
 #include "tdma.h"
 #include <stdlib.h>
 
+static struct tx_spec_s tx_spec;
 static struct dw1000_instance_s uwb_instance;
 static struct tdma_spec_s tdma_spec;
-static bool data_slot_allocated;
+static uint8_t slot_id_list[MAX_NUM_DEVICES];
 static struct tx_spec_s tx_spec;
-static bool send_log_now;
-//maintains list of slot to node id map
-uint8_t slot_id_list[MAX_NUM_DEVICES];
 static uint64_t slot_start_timestamp;
 static struct message_spec_s msg;
 
@@ -24,14 +22,19 @@ static uint16_t num_rts_received;
 static uint16_t num_cts_received;
 static uint16_t num_ds_received;
 static uint16_t num_dack_received;
+static uint16_t num_rx_ovrr;
 
 /*
-    Initialize TDMA vars
-*/
-#define DEBUG_PRINT  0
 
-void tdma_init(uint8_t tx_type, struct tx_spec_s _tx_spec, uint8_t target_body_id)
+    Supervisor Methods
+
+*/
+/*
+    TDMA Init
+*/
+void tdma_supervisor_init(struct tx_spec_s _tx_spec, uint8_t target_body_id)
 {
+    //TDMA Init
     tdma_spec.slot_size = SLOT_SIZE;
     tdma_spec.tags_online = 0;
     tdma_spec.anchors_online = 1;
@@ -40,6 +43,7 @@ void tdma_init(uint8_t tx_type, struct tx_spec_s _tx_spec, uint8_t target_body_i
     tdma_spec.cnt = 0;
     tdma_spec.num_slots = 1;
     tdma_spec.target_body_id = target_body_id;
+
     //Medium Access init
     started_acquiring_medium = false;
     rts_backoff_mask = INITIAL_BACKOFF_MASK;
@@ -55,25 +59,25 @@ void tdma_init(uint8_t tx_type, struct tx_spec_s _tx_spec, uint8_t target_body_i
     num_cts_received = 0;
     num_ds_received = 0;
     num_dack_received = 0;
-    
-    //seed random number generator
-    srand(tx_spec.node_id);
 
     memcpy(&tx_spec, &_tx_spec, sizeof(tx_spec));
     tx_spec.body_id = _tx_spec.node_id;
+
+    //seed random number generator
+    srand(((uint32_t)tx_spec.node_id) | ((uint32_t)tx_spec.body_id<<16));
+
     memset(slot_id_list, 0, sizeof(slot_id_list));
-    if (tx_type == TDMA_SUPERVISOR) {
-        twr_init(tx_spec.node_id, 0);
-    }
+    twr_init(tx_spec.node_id, 0);
     dw1000_init(&uwb_instance, 3, BOARD_PAL_LINE_SPI3_UWB_CS, BOARD_PAL_LINE_UWB_NRST, tx_spec.ant_delay);
+
     dw1000_rx_enable(&uwb_instance);
 }
 
 /*
-
-    Supervisor Runner
-
-*/
+  Sends a start slot message from supervisor.
+  This message is regarded as a initiator for
+  suboordinates in the body to send data at allocated slots.
+ */
 static void super_update_start_slot(void)
 {
     if (start_transmit_delay == 0) {
@@ -94,8 +98,9 @@ static void super_update_start_slot(void)
     msg.tx_spec = tx_spec;
     
     dw1000_disable_transceiver(&uwb_instance);
-    
+
     uint64_t scheduled_time = (dw1000_get_sys_time(&uwb_instance)+ARB_TIME_SYS_TICKS)&0xFFFFFFFFFFFFFE00ULL;
+
     setup_ranging_pkt_for_tx(tdma_spec.num_slots, scheduled_time, &msg);
     
     if(!dw1000_scheduled_transmit(&uwb_instance, scheduled_time, 
@@ -104,11 +109,18 @@ static void super_update_start_slot(void)
     }
 }
 
-static void handle_request_slot(struct message_spec_s *msg)
+/**
+ * Handles request for time slot for modules on the same body.
+ *  Request slot is usually at the end of the slot, the suboordinates
+ *  only one module can make a request for slot per start message
+ *  so subordinates use exponential backoff scheme for requesting data slot.
+ *
+ */
+static void handle_request_slot(void)
 {
     for (uint8_t i = 0; i < (tdma_spec.num_slots+1); i++) {
-        if(slot_id_list[i] == msg->tx_spec.node_id) {
-            tdma_spec.req_node_id = msg->tx_spec.node_id;
+        if(slot_id_list[i] == msg.tx_spec.node_id) {
+            tdma_spec.req_node_id = msg.tx_spec.node_id;
             tdma_spec.res_data_slot = i + 1;
             return;
         }
@@ -118,33 +130,28 @@ static void handle_request_slot(struct message_spec_s *msg)
         return;
     }
 
-    if (msg->tx_spec.type == TAG) {
+    if (msg.tx_spec.type == TAG) {
         tdma_spec.tags_online++;
     } else {
         tdma_spec.anchors_online++;
     }
-    tdma_spec.req_node_id = msg->tx_spec.node_id;
+    tdma_spec.req_node_id = msg.tx_spec.node_id;
     tdma_spec.res_data_slot = tdma_spec.num_slots;
     tdma_spec.num_slots++;
     //record allocated slot id
-    slot_id_list[tdma_spec.res_data_slot] = msg->tx_spec.node_id;
+    slot_id_list[tdma_spec.res_data_slot] = msg.tx_spec.node_id;
     uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Super: ", "New Node Discovered");
 
 }
 
 // Contention based scheme for InterBody communication
-static bool is_medium_access_msg(struct message_spec_s *msg)
-{
-    if ( (((uint16_t*)msg)[0] == RTS_MAGIC) ||
-         (((uint16_t*)msg)[0] == CTS_MAGIC) ||
-         (((uint16_t*)msg)[0] == DS_MAGIC) ||
-         (((uint16_t*)msg)[0] == DACK_MAGIC)) {
-        return true;
-    }
-    return false;
-}
 
-static void try_acquiring_medium()
+/*
+    Do Contention based medium access, will be initiated by a supervisor on the
+    body to take control of the bus, so that it can talk to opposing body or do 
+    antenna delay calibration routine.
+*/
+static void try_acquiring_medium(void)
 {
     if (rts_received_sleep != 0) {
         //don't send rts for now
@@ -162,26 +169,39 @@ static void try_acquiring_medium()
     dw1000_disable_transceiver(&uwb_instance);
     dw1000_transmit(&uwb_instance, sizeof(struct body_comm_pkt), &pkt, true);
     //update backoff cnt for next try
-    rts_backoff_cnt = rand() & rts_backoff_mask;
+    rts_backoff_cnt = (rand() & rts_backoff_mask)*4;
     rts_backoff_mask = (rts_backoff_mask << 1) | 1;
 }
 
-static void start_acquiring_medium()
+/*
+    Initiate Medium Access routine.
+    Reset backoff mask to initial range and set random number of thread runs to
+    wait before sending Ready To Send
+*/
+static void start_acquiring_medium(void)
 {
-    rts_backoff_cnt = rand() & INITIAL_BACKOFF_MASK;
     rts_backoff_mask = INITIAL_BACKOFF_MASK;
+    rts_backoff_cnt = (rand() & INITIAL_BACKOFF_MASK)*4;
     try_acquiring_medium();
     started_acquiring_medium = true;
 }
 
-static void stop_acquiring_medium()
+/*
+    Stop Medium Access routine
+    Reset backoff mask here as well, in case we are called due to timeout.
+    i.e. no Data ACK was received
+*/
+static void stop_acquiring_medium(void)
 {
-    rts_backoff_cnt = rand() & INITIAL_BACKOFF_MASK;
     rts_backoff_mask = INITIAL_BACKOFF_MASK;
+    rts_backoff_cnt = (rand() & INITIAL_BACKOFF_MASK)*4;
     defer_acquire_medium_tstart = millis();
     started_acquiring_medium = false;
 }
 
+/*
+    Handle Media Access messages sent by other supervisors.
+*/
 static void handle_comm_req_slot(struct body_comm_pkt *pkt) {
     switch (pkt->magic) {
         case RTS_MAGIC:
@@ -192,6 +212,7 @@ static void handle_comm_req_slot(struct body_comm_pkt *pkt) {
                 pkt->target_body_id = pkt->body_id;
                 pkt->body_id = tx_spec.body_id;
                 dw1000_disable_transceiver(&uwb_instance);
+                chThdSleepMicroseconds(SLOT_SIZE/4);
                 dw1000_transmit(&uwb_instance, sizeof(struct body_comm_pkt), pkt, true);
             }
             rts_received_sleep = 4; //sleep for 4 loop cycles
@@ -205,6 +226,7 @@ static void handle_comm_req_slot(struct body_comm_pkt *pkt) {
                 pkt->target_body_id = pkt->body_id;
                 pkt->body_id = tx_spec.body_id;
                 dw1000_disable_transceiver(&uwb_instance);
+                chThdSleepMicroseconds(SLOT_SIZE/4);
                 dw1000_transmit(&uwb_instance, sizeof(struct body_comm_pkt), pkt, true);
             }
             num_cts_received++;
@@ -234,13 +256,20 @@ static void handle_comm_req_slot(struct body_comm_pkt *pkt) {
     }
 }
 
-static void update_data_slot()
+/*
+    Regular data read update method, any data received goes through
+    this method.
+*/
+static void update_data_slot(void)
 {
     //reset msg
     memset(&msg, 0, sizeof(msg));
     //We shall receive a data packet sometime in the middle of this sleep
     struct dw1000_rx_frame_info_s rx_info = dw1000_receive(&uwb_instance, sizeof(msg), &msg);
     //Handle Data Packet
+    if (rx_info.err_code == DW1000_RX_ERROR_RXOVRR) {
+        num_rx_ovrr++;
+    }
     if (rx_info.err_code == DW1000_RX_ERROR_NONE) {
         if (is_medium_access_msg(&msg)) {
             handle_comm_req_slot((struct body_comm_pkt*)&msg);
@@ -249,7 +278,7 @@ static void update_data_slot()
             if (msg.tx_spec.data_slot_id == 255 && 
                 msg.tx_spec.body_id == tx_spec.body_id) {
                 //handle intra module slot request
-                handle_request_slot(&msg);
+                handle_request_slot();
             } else if (tx_spec.type == TAG) {
                 update_tag(&msg, &tx_spec, rx_info.timestamp);
             } else {
@@ -267,11 +296,6 @@ static void update_data_slot()
             }
         }
     }
-    if (started_acquiring_medium) {
-        //We need to be in continuous lookout for messages
-        //even if we didn't send anything last cycle
-        dw1000_rx_enable(&uwb_instance);
-    }
     if (schedule_dack) {
         //check if its fine to setup DACK transmit
         if ((dw1000_get_sys_time(&uwb_instance) - slot_start_timestamp) >= 
@@ -283,8 +307,9 @@ static void update_data_slot()
             pkt.target_body_id = tdma_spec.target_body_id;
             pkt.body_id = tx_spec.body_id;
             dw1000_disable_transceiver(&uwb_instance);
-            dw1000_transmit(&uwb_instance, sizeof(struct body_comm_pkt), &pkt, true);
+            dw1000_transmit(&uwb_instance, sizeof(struct body_comm_pkt), &pkt, false);
             chThdSleepMicroseconds(SLOT_SIZE/4);
+            dw1000_rx_enable(&uwb_instance);
             //also try acquiring medium
             start_acquiring_medium();
             schedule_dack = false;
@@ -293,16 +318,30 @@ static void update_data_slot()
     }
 }
 
+/*
+    Main Loop for Supervisor
+*/
 void tdma_supervisor_run(void)
 {
-    uint16_t cnt = 0;
     tx_spec.data_slot_id = 0;
-    uint32_t last_perf_print = 0, last_successful_recieves = 0;
+    uint32_t last_perf_print = 0, last_successful_recieves = 0, perf_cnt = 0;
+    uint64_t last_us, avg_period = 0, max_period = 0, curr_period;
     while (true) {
+        perf_cnt++;
         update_data_slot();
         super_update_start_slot();
-        if ((millis() - last_perf_print) > 5000) {
 
+        //Perf Measurement
+        curr_period = micros() - last_us;
+        avg_period += curr_period;
+        if (curr_period > max_period) {
+            max_period = curr_period;
+        }
+        last_us = micros();
+
+        if ((millis() - last_perf_print) > 5000) {
+            uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "\nSuper PERF",
+                "\nPERIOD: %lu/%lu RXOVRR: %d", (uint32_t)(avg_period/perf_cnt), (uint32_t)max_period, num_rx_ovrr);
             uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Super PERF",
                 "NID:%x TX: %d RX: %d Rate: %d RTS: %d CTS: %d DS: %d DACK: %d", 
                 tx_spec.node_id,
@@ -312,184 +351,17 @@ void tdma_supervisor_run(void)
 
             last_successful_recieves = num_successful_recieves;
             last_perf_print = millis();
+            perf_cnt = 0;
+            max_period = 0;
+            avg_period = 0;
         }
         //we only send start here incase of faillure or initialisation
         if (((millis() - defer_acquire_medium_tstart) >= DEFER_TIME) || 
             started_acquiring_medium) {
+            started_acquiring_medium = true;
             try_acquiring_medium();
         }
         chThdSleepMicroseconds(SLOT_SIZE/4);
     }
 }
 
-/*
-    Subordinate Runner
-*/
-static void req_data_slot(uint8_t num_starts, struct dw1000_rx_frame_info_s rx_info)
-{
-    static uint8_t skip_req;
-    static uint8_t skip_mask = 1;
-    if (skip_req != 0) {
-        skip_req--;
-        return;
-    }
-    //In case the request fails to receive the supervisor time we skip request
-    skip_req = rand() & skip_mask;
-    skip_mask = (skip_mask << 1) | 1;
-
-    struct message_spec_s msg;
-    uint64_t scheduled_time = (rx_info.timestamp+DW1000_SID2ST(tdma_spec.num_slots))&0xFFFFFFFFFFFFFE00ULL;
-    //pack message
-    msg.tdma_spec = tdma_spec;
-    msg.tx_spec = tx_spec;
-    msg.tx_spec.data_slot_id = 255;
-    dw1000_disable_transceiver(&uwb_instance);
-    if(dw1000_scheduled_transmit(&uwb_instance, scheduled_time, 
-        MSG_HEADER_SIZE + MSG_PAYLOAD_SIZE(5), &msg, true)) {
-        uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Sub: ", "Requesting Data Slot @ %u for %x", tdma_spec.num_slots+1, tx_spec.node_id);
-    } else {
-        uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Sub: ", "Requesting Data Slot Failed %d", MSG_HEADER_SIZE);
-    }
-}
-
-static void update_subordinate(void)
-{
-    //reset msg
-    memset(&msg, 0, sizeof(msg));
-    struct dw1000_rx_frame_info_s rx_info = dw1000_receive(&uwb_instance, sizeof(msg), &msg);
-    static bool transmit_scheduled = false;
-    if(rx_info.err_code == DW1000_RX_ERROR_NONE) {
-        if (is_medium_access_msg(&msg)) {
-            //this is supervisor business do nothing
-            return;
-        }
-
-        if (msg.tx_spec.data_slot_id >= MAX_NUM_DEVICES) {
-            //probably a device requesting data slot
-            return;
-        }
-        if (msg.tdma_spec.num_slots - 1 < tx_spec.data_slot_id) {
-            data_slot_allocated = false;
-        }
-        if(msg.tx_spec.data_slot_id == 0) { //this is a message from supervisor
-            transmit_scheduled = false;
-            slot_start_timestamp = rx_info.timestamp;
-            tdma_spec = msg.tdma_spec;
-
-            if (!data_slot_allocated && tdma_spec.req_node_id == tx_spec.node_id) {
-                tx_spec.data_slot_id = tdma_spec.res_data_slot;
-                data_slot_allocated = true;
-                twr_init(tx_spec.node_id, tx_spec.data_slot_id);
-            }
-            //check if we should ask for data slot, if yes request
-            if(!data_slot_allocated) {
-                req_data_slot(tdma_spec.cnt, rx_info);
-            }
-        }
-
-        if(!data_slot_allocated) {
-            return;
-        }
-        //Also setup ranging request of our own
-        if (data_slot_allocated) {
-            if (tx_spec.type == TAG) {
-                update_tag(&msg, &tx_spec, rx_info.timestamp);
-            } else {
-                update_anchor(&msg, &tx_spec, rx_info.timestamp);
-            }
-        }
-    }
-    if (!transmit_scheduled && data_slot_allocated) {
-        //check if its fine to setup next transmit
-        if ((dw1000_get_sys_time(&uwb_instance) - slot_start_timestamp) >= (DW1000_SID2ST(tx_spec.data_slot_id) - ARB_TIME_SYS_TICKS)) {
-            dw1000_disable_transceiver(&uwb_instance);
-            //setup future transmit
-            uint64_t scheduled_time = (slot_start_timestamp+DW1000_SID2ST(tx_spec.data_slot_id))&0xFFFFFFFFFFFFFE00ULL;
-            //create TWR data sets to send
-            memset(&msg, 0, sizeof(msg));
-            //pack message
-            msg.tdma_spec = tdma_spec;
-            msg.tx_spec = tx_spec;
-            setup_ranging_pkt_for_tx(tdma_spec.num_slots, scheduled_time, &msg);
-            //send ranging pkt
-            if (dw1000_scheduled_transmit(&uwb_instance, scheduled_time, 
-                           MSG_HEADER_SIZE + MSG_PAYLOAD_SIZE(5), &msg, true)) {
-                tx_spec.pkt_cnt++;
-            }
-            transmit_scheduled = true;
-        }
-    }
-}
-
-void tdma_subordinate_run(void)
-{
-    while (true) {
-        update_subordinate();
-        chThdSleepMicroseconds(SLOT_SIZE/4);
-    }
-}
-
-/*
-
-    TDMA Sniffer Runner
-
-*/
-
-static void print_info(struct message_spec_s *msg, struct dw1000_rx_frame_info_s rx_info)
-{
-    if(!send_log_now) {
-        return;
-    }
-
-    if(is_medium_access_msg(msg)) {
-        struct body_comm_pkt *pkt = (struct body_comm_pkt *)msg;
-        switch (pkt->magic) {
-            case RTS_MAGIC:
-                uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "RTS_MAGIC",
-                    "T:%.0f BID: %x TID: %x", rx_info.timestamp/UWB_SYS_TICKS, pkt->body_id, pkt->target_body_id);
-                break;
-            case CTS_MAGIC:
-                uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "CTS_MAGIC",
-                    "T:%.0f BID: %x TID: %x", rx_info.timestamp/UWB_SYS_TICKS, pkt->body_id, pkt->target_body_id);
-                break;
-            case DS_MAGIC:
-                uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "DS_MAGIC",
-                    "T:%.0f BID: %x TID: %x", rx_info.timestamp/UWB_SYS_TICKS, pkt->body_id, pkt->target_body_id);
-                break;
-            case DACK_MAGIC:
-                uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "DACK_MAGIC",
-                    "T:%.0f BID: %x TID: %x", rx_info.timestamp/UWB_SYS_TICKS, pkt->body_id, pkt->target_body_id);
-                break;
-        };
-    }else {    //print_tdma_spec();
-        for (uint8_t i = 0; i < msg->tdma_spec.num_slots; i++) {
-            uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "TWR", 
-                "NID: %x RX_LEN: %d NUM_SLOTS: %d T:%.0f Status: %d Range: %f",
-                msg->tx_spec.node_id, rx_info.len, msg->tdma_spec.num_slots, rx_info.timestamp/UWB_SYS_TICKS, 
-                msg->ds_twr_data[i].trip_status, msg->ds_twr_data[i].tprop);
-        }
-    }
-}
-
-void tdma_sniffer_run(void)
-{
-    uint32_t cnt = 0;
-    dw1000_rx_enable(&uwb_instance);
-    while(true) {
-        memset(&msg, 0, sizeof(msg));
-        struct dw1000_rx_frame_info_s rx_info = dw1000_receive(&uwb_instance, sizeof(msg), &msg);
-        if(rx_info.err_code == DW1000_RX_ERROR_NONE) {
-            cnt++;
-            //process_twr(&msg.ds_twr_data, &msg.tx_spec);
-            //tdma_spec = msg.tdma_spec;
-            print_info(&msg, rx_info);
-        }
-        if(cnt % 100 <= 10) {
-            send_log_now = true;
-        } else if (send_log_now) {
-            uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "TWR", "\n\n\n");
-            send_log_now = false;
-        }
-        chThdSleepMicroseconds(SLOT_SIZE/8);
-    }
-}

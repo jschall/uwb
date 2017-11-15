@@ -80,10 +80,11 @@ int main(void) {
     tx_spec_init.pkt_cnt = 0;
     tx_spec_init.data_slot_id = 255;
 
-    tdma_init(param_tdma_tx_type, tx_spec_init, param_tdma_tbody_id);
     if (param_tdma_tx_type == TDMA_SUPERVISOR) { // we are tdma supervisor
+        tdma_supervisor_init(tx_spec_init, param_tdma_tbody_id);
         tdma_supervisor_run();
     } else if (param_tdma_tx_type == TDMA_SUBORDINATE) {
+        tdma_subordinate_init(tx_spec_init);
         tdma_subordinate_run();
     } else {
         tdma_sniffer_run();

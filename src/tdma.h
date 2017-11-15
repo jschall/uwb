@@ -11,6 +11,7 @@
 #include <modules/uavcan/uavcan.h>
 #include "twr.h"
 #include <modules/uavcan_debug/uavcan_debug.h>
+
 //TODO: Convert these to parameter
 #define MAX_HEADER_SIZE 93
 #define TX_RATE 6800000
@@ -88,7 +89,9 @@ struct __attribute__((packed)) body_comm_pkt {
     uint8_t target_body_id;
 };
 
-void tdma_init(uint8_t tx_type, struct tx_spec_s tx_spec, uint8_t tbody_id);
+void tdma_supervisor_init(struct tx_spec_s _tx_spec, uint8_t target_body_id);
+void tdma_subordinate_init(struct tx_spec_s _tx_spec);
 void tdma_supervisor_run(void);
 void tdma_subordinate_run(void);
 void tdma_sniffer_run(void);
+bool is_medium_access_msg(struct message_spec_s *_msg);
