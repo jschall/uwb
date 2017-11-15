@@ -41,6 +41,7 @@ PARAM_DEFINE_BOOL_PARAM_STATIC(param_i, "i", true)
 */
 PARAM_DEFINE_UINT8_PARAM_STATIC(param_tdma_unit_type, "TDMA_UNIT_TYPE", ANCHOR, 0, 1)
 PARAM_DEFINE_UINT8_PARAM_STATIC(param_tdma_tx_type, "TDMA_TX_TYPE", TDMA_SUPERVISOR, 0, 2)
+PARAM_DEFINE_UINT8_PARAM_STATIC(param_tdma_tbody_id, "TDMA_TBODY_ID", 0xFF, 0, 0xFF)
 PARAM_DEFINE_UINT32_PARAM_STATIC(param_ant_delay, "ANTENNA_DELAY", 0, 0, UINT32_MAX)
 PARAM_DEFINE_BOOL_PARAM_STATIC(param_ant_delay_cal, "ANT_DELAY_CAL", false)
 PARAM_DEFINE_FLOAT32_PARAM_STATIC(param_anchor_pos_x, "ANCHOR_POS_X", 0.0f, -500.0f, 500.0f)
@@ -79,7 +80,7 @@ int main(void) {
     tx_spec_init.pkt_cnt = 0;
     tx_spec_init.data_slot_id = 255;
 
-    tdma_init(param_tdma_tx_type, tx_spec_init);
+    tdma_init(param_tdma_tx_type, tx_spec_init, param_tdma_tbody_id);
     if (param_tdma_tx_type == TDMA_SUPERVISOR) { // we are tdma supervisor
         tdma_supervisor_run();
     } else if (param_tdma_tx_type == TDMA_SUBORDINATE) {

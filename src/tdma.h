@@ -15,19 +15,26 @@
 #define MAX_HEADER_SIZE 93
 #define TX_RATE 6800000
 
-#define SLOT_SIZE 4000ULL    //4ms
+#define SLOT_SIZE 4000ULL    //8ms
 #define TOTAL_AVAILABLE_SLOTS 10
 #define MAX_NUM_DEVICES TOTAL_AVAILABLE_SLOTS
-
+#define INITIAL_BACKOFF_MASK 0x7
 //TODO: Implement Supervisor switch in case of timeout
 //TODO: Implement Delayed Receive for more failsafe receive
 
 
 #define UWB_SYS_TICKS 63897.6f
+#define DEFER_TIME ((SLOT_SIZE/200) + (SLOT_SIZE/500))
 #define ARB_TIME SLOT_SIZE/2
 #define ARB_TIME_SYS_TICKS ((uint64_t)(ARB_TIME*UWB_SYS_TICKS))
 #define DW1000_SID2ST(x) ((uint64_t)(((x)*(UWB_SYS_TICKS*SLOT_SIZE))))
 
+enum {
+    RTS_MAGIC = 0xAF60,
+    CTS_MAGIC,
+    DS_MAGIC,
+    DACK_MAGIC
+};
 
 enum tdma_slots {
     START_SLOT,
@@ -50,6 +57,7 @@ struct __attribute__((packed)) tdma_spec_s {
     uint8_t num_slots;
     uint8_t tags_online;
     uint8_t anchors_online;
+    uint8_t target_body_id;
     uint8_t res_data_slot;
     uint8_t req_node_id;
     uint8_t cnt;
@@ -59,6 +67,7 @@ struct __attribute__((packed)) tdma_spec_s {
 struct __attribute__((packed)) tx_spec_s {
     uint8_t type;
     uint8_t node_id;
+    uint8_t body_id;
     uint8_t data_slot_id;
     uint8_t ant_delay_cal;
     uint32_t ant_delay;
@@ -73,19 +82,13 @@ struct __attribute__((packed)) message_spec_s {
     struct ds_twr_data_s ds_twr_data[MAX_NUM_DEVICES];
 };
 
-struct __attribute__((packed)) comm_request_pkt {
+struct __attribute__((packed)) body_comm_pkt {
     uint16_t magic;
     uint8_t body_id;
-    uint8_t defer_slots;
+    uint8_t target_body_id;
 };
 
-struct __attribute__((packed)) comm_response_pkt {
-    uint16_t magic;
-    uint8_t body_id;
-    uint8_t defer_slots;
-};
-
-void tdma_init(uint8_t tx_type, struct tx_spec_s tx_spec);
+void tdma_init(uint8_t tx_type, struct tx_spec_s tx_spec, uint8_t tbody_id);
 void tdma_supervisor_run(void);
 void tdma_subordinate_run(void);
 void tdma_sniffer_run(void);
