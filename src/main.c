@@ -26,20 +26,46 @@ PARAM_DEFINE_BOOL_PARAM_STATIC(device_is_transmitter, "tx", true)
 static struct dw1000_instance_s uwb_instance;
 static struct worker_thread_timer_task_s interval_task;
 
+#define NUM_SAMPLES 200
+static struct {
+    float rssi;
+    float fp_rssi;
+    float std_noise;
+} samples[NUM_SAMPLES];
+static uint8_t samples_collected;
+
 static void rx_task_func(struct worker_thread_timer_task_s* task) {
     (void)task;
     uint8_t buf[128];
     struct dw1000_rx_frame_info_s rx_info = dw1000_receive(&uwb_instance, sizeof(buf), &buf);
 
     if (rx_info.err_code == DW1000_RX_ERROR_NONE && !memcmp(buf, "foo", strlen("foo"))) {
-//         dw1000_disable_transceiver(&uwb_instance);
-//         dw1000_rx_enable(&uwb_instance);
-        uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "", "");
-        uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "", "std_noise=%u", rx_info.std_noise);
-        uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "", "fp_ampl1=%u, fp_ampl2=%u, fp_ampl3=%u", rx_info.fp_ampl1, rx_info.fp_ampl2, rx_info.fp_ampl3);
-        uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "", "cir_pwr=%u, rxpacc_corrected=%u", rx_info.cir_pwr, rx_info.rxpacc_corrected);
-        uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "", "rssi_est=%f", rx_info.rssi_est);
-        uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "", "fp_rssi_est=%f", rx_info.fp_rssi_est);
+        if (rx_info.cir_pwr == 0) {
+            dw1000_disable_transceiver(&uwb_instance);
+            dw1000_rx_enable(&uwb_instance);
+            return;
+        }
+        samples[samples_collected].rssi = rx_info.rssi_est;
+        samples[samples_collected].fp_rssi = rx_info.fp_rssi_est;
+        samples[samples_collected].std_noise = rx_info.std_noise;
+        samples_collected++;
+        if (samples_collected >= NUM_SAMPLES) {
+            samples_collected = 0;
+            
+            float rssi_avg = 0;
+            float fp_rssi_avg = 0;
+            float std_noise = 0;
+            for (uint8_t i=0; i<NUM_SAMPLES; i++) {
+                rssi_avg += samples[i].rssi;
+                fp_rssi_avg += samples[i].fp_rssi;
+                std_noise += samples[i].std_noise;
+            }
+            rssi_avg /= NUM_SAMPLES;
+            fp_rssi_avg /= NUM_SAMPLES;
+            std_noise /= NUM_SAMPLES;
+            
+            uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "", "rssi=%.2f fp_rssi=%.2f diff=%.2f noise=%.2f", rssi_avg, fp_rssi_avg, rssi_avg-fp_rssi_avg, std_noise);
+        }
     }
 }
 
@@ -49,11 +75,11 @@ int main(void) {
     if (device_is_transmitter) {
         while (true) {
             dw1000_transmit(&uwb_instance, strlen("foo"), "foo", false);
-            chThdSleep(S2ST(1));
+            chThdSleep(MS2ST(10));
         }
     } else {
         dw1000_rx_enable(&uwb_instance);
-        worker_thread_add_timer_task(&lpwork_thread, &interval_task, rx_task_func, NULL, MS2ST(10), true);
+        worker_thread_add_timer_task(&lpwork_thread, &interval_task, rx_task_func, NULL, MS2ST(1), true);
     }
 
     chThdSleep(TIME_INFINITE);
