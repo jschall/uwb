@@ -19,41 +19,107 @@
 #include <modules/uavcan_debug/uavcan_debug.h>
 #include <modules/lpwork_thread/lpwork_thread.h>
 #include <modules/param/param.h>
+#include <common/helpers.h>
 #include <string.h>
 
-PARAM_DEFINE_BOOL_PARAM_STATIC(device_is_transmitter, "tx", true)
+#define TREPLY 70000000
+
+struct __attribute__((packed)) ds_twr_msg_s {
+    uint8_t seq;
+    int32_t tround1;
+    int32_t treply2;
+};
+
+#define SAMPLES_SIZE 50
+static float samples[SAMPLES_SIZE];
+static uint32_t samples_collected;
+
+PARAM_DEFINE_BOOL_PARAM_STATIC(device_is_initiator, "initiator", true)
+PARAM_DEFINE_UINT32_PARAM_STATIC(twait, "twait", 1000, 0, 1000000)
 
 static struct dw1000_instance_s uwb_instance;
-static struct worker_thread_timer_task_s interval_task;
 
-static void rx_task_func(struct worker_thread_timer_task_s* task) {
-    (void)task;
-    uint8_t buf[128];
-    struct dw1000_rx_frame_info_s rx_info = dw1000_receive(&uwb_instance, sizeof(buf), &buf);
+static void responder_run(void) {
+    struct ds_twr_msg_s msg;
+    struct dw1000_rx_frame_info_s rx_info;
+    uint64_t t1, t3, t6;
+    dw1000_rx_enable(&uwb_instance);
+    while (true) {
+        rx_info = dw1000_receive(&uwb_instance, sizeof(msg), &msg);
+        if (rx_info.err_code == DW1000_RX_ERROR_NONE && rx_info.len == sizeof(msg) && msg.seq == 0) {
+            msg.seq++;
+            t1 = rx_info.timestamp;
+            t3 = (rx_info.timestamp + TREPLY) & ~0x1ffULL;
+            dw1000_disable_transceiver(&uwb_instance);
+            dw1000_scheduled_transmit(&uwb_instance, rx_info.timestamp+TREPLY, sizeof(msg), &msg, true);
 
-    if (rx_info.err_code == DW1000_RX_ERROR_NONE && !memcmp(buf, "foo", strlen("foo"))) {
-//         dw1000_disable_transceiver(&uwb_instance);
-//         dw1000_rx_enable(&uwb_instance);
-        uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "", "");
-        uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "", "std_noise=%u", rx_info.std_noise);
-        uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "", "fp_ampl1=%u, fp_ampl2=%u, fp_ampl3=%u", rx_info.fp_ampl1, rx_info.fp_ampl2, rx_info.fp_ampl3);
-        uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "", "cir_pwr=%u, rxpacc_corrected=%u", rx_info.cir_pwr, rx_info.rxpacc_corrected);
-        uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "", "rssi_est=%f", rx_info.rssi_est);
-        uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "", "fp_rssi_est=%f", rx_info.fp_rssi_est);
+            chThdSleep(twait);
+            rx_info = dw1000_receive(&uwb_instance, sizeof(msg), &msg);
+            if (rx_info.err_code == DW1000_RX_ERROR_NONE && rx_info.len == sizeof(msg) && msg.seq == 2) {
+                t6 = rx_info.timestamp;
+                uint64_t treply1 = t3-t1;
+                uint64_t tround1 = msg.tround1;
+                uint64_t treply2 = msg.treply2;
+                uint64_t tround2 = t6-t3;
+                uint64_t tprop = (tround1*tround2-treply1*treply2)/(tround1+tround2+treply1+treply2);
+                float dist = TIME_TO_METERS*tprop;
+                samples[samples_collected] = dist;
+                samples_collected++;
+                if (samples_collected >= SAMPLES_SIZE) {
+                    float range_mean = 0;
+                    float range_sigma = 0;
+                    for (uint32_t i=0; i<samples_collected; i++) {
+                        range_mean += samples[i];
+                    }
+                    range_mean /= samples_collected;
+                    for (uint32_t i=0; i<samples_collected; i++) {
+                        range_sigma += SQ(samples[i]-range_mean);
+                    }
+                    range_sigma = sqrtf(range_sigma/(samples_collected-1));
+
+                    uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "responder", "mean = %.3fm, sigma = %.3fm", range_mean-153.7f, range_sigma);
+
+                    samples_collected = 0;
+                }
+            }
+        }
+
+        chThdSleep(US2ST(10));
+    }
+}
+
+static void initiator_run(void) {
+    struct ds_twr_msg_s msg;
+    struct dw1000_rx_frame_info_s rx_info;
+    uint64_t t0, t4, t5;
+    while (true) {
+        memset(&msg, 0, sizeof(msg));
+        dw1000_disable_transceiver(&uwb_instance);
+        dw1000_transmit(&uwb_instance, sizeof(msg), &msg, true);
+        chThdSleep(twait);
+        rx_info = dw1000_receive(&uwb_instance, sizeof(msg), &msg);
+        if (rx_info.err_code == DW1000_RX_ERROR_NONE && rx_info.len == sizeof(msg) && msg.seq == 1) {
+            t0 = dw1000_get_tx_stamp(&uwb_instance);
+            t4 = rx_info.timestamp;
+            t5 = (rx_info.timestamp + TREPLY) & ~0x1ffULL;
+            msg.tround1 = t4-t0;
+            msg.treply2 = t5-t4;
+            msg.seq++;
+            dw1000_disable_transceiver(&uwb_instance);
+            dw1000_scheduled_transmit(&uwb_instance, rx_info.timestamp+TREPLY, sizeof(msg), &msg, true);
+        }
+
+        chThdSleep(MS2ST(25));
     }
 }
 
 int main(void) {
     dw1000_init(&uwb_instance, 3, BOARD_PAL_LINE_SPI3_UWB_CS, BOARD_PAL_LINE_UWB_NRST, 0);
 
-    if (device_is_transmitter) {
-        while (true) {
-            dw1000_transmit(&uwb_instance, strlen("foo"), "foo", false);
-            chThdSleep(S2ST(1));
-        }
+    if (device_is_initiator) {
+        initiator_run();
     } else {
-        dw1000_rx_enable(&uwb_instance);
-        worker_thread_add_timer_task(&lpwork_thread, &interval_task, rx_task_func, NULL, MS2ST(10), true);
+        responder_run();
     }
 
     chThdSleep(TIME_INFINITE);
