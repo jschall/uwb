@@ -1,28 +1,21 @@
 #include "twr.h"
 #include "tdma.h"
 
-static uint8_t curr_idx;
-static uint8_t my_node_id;
-static uint8_t my_slot_id;
-static uint8_t num_sol;
-static uint16_t trip_cnt;
+
+static uint8_t trip_id[MAX_NUM_DEVICES];
+static uint8_t twr_status[MAX_NUM_DEVICES];
 static float calib_data[3][3];
 static uint16_t sample_count[3][3];
 
 //Contains list of data_sets for ranging
-struct ds_twr_data_s range_pkt2send[MAX_NUM_DEVICES];
-
-
+static int64_t rx_tstamp_list[MAX_NUM_DEVICES][2];
+static int64_t tx_tstamp_list[MAX_NUM_DEVICES][2];
+static float range[MAX_NUM_DEVICES];
 /*
     Common TWR methods
 */
-void twr_init(uint8_t _my_node_id, uint8_t _my_slot_id)
+void twr_init()
 {
-    my_node_id = _my_node_id;
-    my_slot_id = _my_slot_id;
-    curr_idx = 0;
-    num_sol = 0;
-    trip_cnt = 0;
 
     for (uint8_t i = 0; i < 3; i++) {
         for (uint8_t j = 0; j < 3; j++) {
@@ -30,118 +23,133 @@ void twr_init(uint8_t _my_node_id, uint8_t _my_slot_id)
             sample_count[i][j] = 0;
         }
     }
-    memset(range_pkt2send, 0, sizeof(range_pkt2send));
+    memset(rx_tstamp_list, 0, sizeof(rx_tstamp_list));
+    memset(tx_tstamp_list, 0, sizeof(tx_tstamp_list));
+    memset(trip_id, 0, sizeof(trip_id));
+    memset(twr_status, 0, sizeof(twr_status));
 }
 
-static void do_ds_twr(struct ds_twr_data_s *pkt)
+static float do_ds_twr(uint8_t trip_id, int64_t tround1, int64_t treply2, int64_t receive_tstamp, uint8_t module_num)
 {
-    double tround1 = TIME_TO_METERS*(double)dw1000_wrap_timestamp(pkt->receive_tstamps[1] - pkt->transmit_tstamps[0]);
-    double treply1 = TIME_TO_METERS*(double)dw1000_wrap_timestamp(pkt->transmit_tstamps[1] - pkt->receive_tstamps[0]);
-    double tround2 = TIME_TO_METERS*(double)dw1000_wrap_timestamp(pkt->receive_tstamps[2] - pkt->transmit_tstamps[1]);
-    double treply2 = TIME_TO_METERS*(double)dw1000_wrap_timestamp(pkt->transmit_tstamps[2] - pkt->receive_tstamps[1]);
-    pkt->tprop = (float)(((tround1*tround2) - (treply1*treply2)) / (tround1+tround2+treply1+treply2));
-}
-
-static void do_ss_twr(struct ds_twr_data_s *pkt)
-{
-    float tround =  TIME_TO_METERS*(float)(pkt->receive_tstamps[1] - pkt->transmit_tstamps[0]);
-    float treply =  TIME_TO_METERS*(float)(pkt->transmit_tstamps[1] - pkt->receive_tstamps[0]);
-    pkt->tprop = (tround - treply)/2;
-}
-
-static void setup_next_trip(uint8_t receive_node_id, int64_t receive_tstamp, uint8_t next_trip_status)
-{
-    switch(next_trip_status) {
-        case TRIP_INIT:
-            //This pkt is meant to initiate trip initialisation by the opposite end as well
-            range_pkt2send[receive_node_id].trip_id = 0;
-            range_pkt2send[receive_node_id].trip_status = TRIP_INIT;
-            memset(range_pkt2send[receive_node_id].transmit_tstamps, 0, 3*sizeof(int64_t));
-            memset(range_pkt2send[receive_node_id].receive_tstamps, 0, 3*sizeof(int64_t));
-            range_pkt2send[receive_node_id].tprop = 0.0f;
+    uint64_t tround2, treply1;
+    switch(trip_id) {
+        case 0:
+            rx_tstamp_list[module_num][0] = receive_tstamp;
+            tround2 = rx_tstamp_list[module_num][0] - tx_tstamp_list[module_num][1];
+            treply1 = tx_tstamp_list[module_num][1] - rx_tstamp_list[module_num][1];
             break;
-        case TRIP_START:
-            //Start two way ranging trip
-            range_pkt2send[receive_node_id].trip_id = 0;
-            range_pkt2send[receive_node_id].trip_status = TRIP_START;
-            memset(range_pkt2send[receive_node_id].transmit_tstamps, 0, 3*sizeof(int64_t));
-            memset(range_pkt2send[receive_node_id].receive_tstamps, 0, 3*sizeof(int64_t));
-            range_pkt2send[receive_node_id].tprop = 0.0f;
+        case 1:
+            rx_tstamp_list[module_num][0] = receive_tstamp;
+            tround2 = rx_tstamp_list[module_num][0] - tx_tstamp_list[module_num][0];
+            treply1 = tx_tstamp_list[module_num][0] - rx_tstamp_list[module_num][1];
             break;
-        case TRIP_REPLY:
-            range_pkt2send[receive_node_id].trip_id++;
-            range_pkt2send[receive_node_id].trip_status = TRIP_REPLY;
-            range_pkt2send[receive_node_id].receive_tstamps[0] = receive_tstamp;
+        case 2:
+            rx_tstamp_list[module_num][1] = receive_tstamp;
+            tround2 = rx_tstamp_list[module_num][1] - tx_tstamp_list[module_num][0];
+            treply1 = tx_tstamp_list[module_num][0] - rx_tstamp_list[module_num][0];
             break;
-        case SS_TWR_SOL:
-            range_pkt2send[receive_node_id].trip_id++;
-            range_pkt2send[receive_node_id].trip_status = SS_TWR_SOL;
-            range_pkt2send[receive_node_id].receive_tstamps[1] = receive_tstamp;
-            //we have enough info to do single sided two way ranging, so do it
-            do_ss_twr(&range_pkt2send[receive_node_id]);
-            break;
-        case DS_TWR_SOL:
-            range_pkt2send[receive_node_id].trip_id++;
-            range_pkt2send[receive_node_id].trip_status = DS_TWR_SOL;
-            range_pkt2send[receive_node_id].receive_tstamps[2] = receive_tstamp;
-            //we have enough info to do double sided two way ranging, so do it
-            do_ds_twr(&range_pkt2send[receive_node_id]);
-            break;
-        case DS_TWR_SOL_RPT:
-            range_pkt2send[receive_node_id].trip_id++;
-            range_pkt2send[receive_node_id].trip_status = DS_TWR_SOL_RPT;
-            //move the last 2 receive times to older positions
-            range_pkt2send[receive_node_id].receive_tstamps[0] = range_pkt2send[receive_node_id].receive_tstamps[1];
-            range_pkt2send[receive_node_id].receive_tstamps[1] = range_pkt2send[receive_node_id].receive_tstamps[2];
-            range_pkt2send[receive_node_id].receive_tstamps[2] = receive_tstamp;
-            //we have enough info to do double sided two way ranging, so do it
-            do_ds_twr(&range_pkt2send[receive_node_id]);
-            //also move older transmits up one pos for next range sol
-            range_pkt2send[receive_node_id].transmit_tstamps[0] = range_pkt2send[receive_node_id].transmit_tstamps[1];
-            range_pkt2send[receive_node_id].transmit_tstamps[1] = range_pkt2send[receive_node_id].transmit_tstamps[2];
+        case 3:
+            rx_tstamp_list[module_num][1] = receive_tstamp;
+            tround2 = rx_tstamp_list[module_num][1] - tx_tstamp_list[module_num][1];
+            treply1 = tx_tstamp_list[module_num][1] - rx_tstamp_list[module_num][0];
             break;
         default:
-            break;
+            return 0.0f;
+    }
+    tround2 = dw1000_wrap_timestamp(tround2);
+    treply1 = dw1000_wrap_timestamp(treply1);
+    if (twr_status[module_num] == TWR_LOCKED) {
+        int64_t tsum = tround1+tround2+treply1+treply2;
+        if(tsum == 0) {
+            return 0.0f;
+        }
+        return DW1000_TIME_TO_METERS * (((float)((tround1*tround2) - (treply1*treply2))) / ((float)tsum));
+    } else {
+        return 0.0f;
     }
 }
 
-void setup_ranging_pkt_for_tx(uint8_t num_online, int64_t transmit_tstamp, struct message_spec_s *msg)
+static void calc_for_transmit(uint8_t trip_id, int64_t *tround1, int64_t *treply2, int64_t transmit_tstamp, uint8_t module_num)
 {
-    for (uint8_t i = 0; i < num_online; i++) {
-        switch(range_pkt2send[i].trip_status) {
-            case TRIP_INIT:
-                msg->ds_twr_data[i] = range_pkt2send[i];
-                break;
-            case TRIP_START:
-                //Copy and note first transmit time
-                range_pkt2send[i].transmit_tstamps[0] = transmit_tstamp;
-                msg->ds_twr_data[i] = range_pkt2send[i];
-                break;
-            case TRIP_REPLY:
-                //Copy and note second transmit time
-                range_pkt2send[i].transmit_tstamps[1] = transmit_tstamp;
-                msg->ds_twr_data[i] = range_pkt2send[i];
-                break;
-            case SS_TWR_SOL:
-                //Copy and note third transmit time
-                range_pkt2send[i].transmit_tstamps[2] = transmit_tstamp;
-                msg->ds_twr_data[i] = range_pkt2send[i];
-                break;
-            case DS_TWR_SOL:
-            case DS_TWR_SOL_RPT:
-                //We have completed two way ranging publish the results
-                range_pkt2send[i].transmit_tstamps[2] = transmit_tstamp;
-                msg->ds_twr_data[i] = range_pkt2send[i];
-                break;
-            default:
-                break;
-        }
+    switch(trip_id) {
+        case 0:
+            tx_tstamp_list[module_num][0] = transmit_tstamp;
+            *tround1 = rx_tstamp_list[module_num][1] - tx_tstamp_list[module_num][1];
+            *treply2 = tx_tstamp_list[module_num][0] - rx_tstamp_list[module_num][1];
+            break;
+        case 1:
+            tx_tstamp_list[module_num][0] = transmit_tstamp;
+            *tround1 = rx_tstamp_list[module_num][0] - tx_tstamp_list[module_num][1];
+            *treply2 = tx_tstamp_list[module_num][0] - rx_tstamp_list[module_num][0];
+            break;
+        case 2:
+            tx_tstamp_list[module_num][1] = transmit_tstamp;
+            *tround1 = rx_tstamp_list[module_num][0] - tx_tstamp_list[module_num][0];
+            *treply2 = tx_tstamp_list[module_num][1] - rx_tstamp_list[module_num][0];
+            break;
+        case 3:
+            tx_tstamp_list[module_num][1] = transmit_tstamp;
+            *tround1 = rx_tstamp_list[module_num][1] - tx_tstamp_list[module_num][0];
+            *treply2 = tx_tstamp_list[module_num][1] - rx_tstamp_list[module_num][1];
+            break;
+        default:
+            return;
+    }
+    *tround1 = dw1000_wrap_timestamp(*tround1);
+    *treply2 = dw1000_wrap_timestamp(*treply2);
+}
+
+//update twr methods
+void update_twr_rx(struct message_spec_s *msg, struct tx_spec_s *tx_spec, int64_t receive_tstamp)
+{
+    switch(msg->ds_twr_data[tx_spec->data_slot_id].twr_status) {
+        case TWR_RESET:
+            twr_status[msg->tx_spec.data_slot_id] = TWR_INIT;
+            trip_id[msg->tx_spec.data_slot_id] = 0;
+            return;
+        case TWR_INIT:
+            if (twr_status[msg->tx_spec.data_slot_id] == TWR_RESET && 
+                trip_id[msg->tx_spec.data_slot_id] == 0) {
+                twr_status[msg->tx_spec.data_slot_id] = TWR_INIT;
+            }
+            break;
+        case TWR_LOCKED:
+            if (twr_status[msg->tx_spec.data_slot_id] == TWR_INIT) {
+                twr_status[msg->tx_spec.data_slot_id] = TWR_LOCKED;
+            }
+            break;
+        default:
+            return;
+    };
+    trip_id[msg->tx_spec.data_slot_id] = msg->ds_twr_data[tx_spec->data_slot_id].trip_id;
+    range[msg->tx_spec.data_slot_id] = do_ds_twr(trip_id[msg->tx_spec.data_slot_id], 
+                                                 msg->ds_twr_data[tx_spec->data_slot_id].tround1, 
+                                                 msg->ds_twr_data[tx_spec->data_slot_id].treply2,
+                                                 receive_tstamp, msg->tx_spec.data_slot_id);
+    //increment trip id
+    trip_id[msg->tx_spec.data_slot_id]++;
+    trip_id[msg->tx_spec.data_slot_id] %= 4;
+
+    if (trip_id[msg->tx_spec.data_slot_id] == 3 && twr_status[msg->tx_spec.data_slot_id] == TWR_INIT) {
+        twr_status[msg->tx_spec.data_slot_id] = TWR_LOCKED;
     }
 }
+
+void update_twr_tx(struct message_spec_s *msg, int64_t transmit_tstamp)
+{
+    for (uint8_t i = 0; i < MAX_NUM_DEVICES; i++) {
+        calc_for_transmit(trip_id[i], &msg->ds_twr_data[i].tround1, &msg->ds_twr_data[i].treply2, transmit_tstamp, i);
+        msg->ds_twr_data[i].trip_id = trip_id[i];
+        msg->ds_twr_data[i].tprop = range[i];
+        msg->ds_twr_data[i].twr_status = twr_status[i];
+    }
+}
+
 
 /*
  Calibration Methods
 */
+
 bool push_calib_data(float range, uint8_t id1, uint8_t id2)
 {
     if (sample_count[id1][id2] != MAX_CAL_SAMPLES) {
@@ -198,36 +206,4 @@ uint16_t get_sample_count(uint8_t id1, uint8_t id2)
 float get_sample_dat(uint8_t id1, uint8_t id2)
 {
     return calib_data[id1][id2];
-}
-
-//ANCHOR update Method
-void update_anchor(struct message_spec_s *msg, struct tx_spec_s *tx_spec, int64_t receive_tstamp)
-{
-    if (msg->tx_spec.type == ANCHOR && msg->tx_spec.ant_delay_cal) {
-        if (range_pkt2send[msg->tx_spec.data_slot_id].trip_status == TRIP_INIT &&
-            msg->ds_twr_data[tx_spec->data_slot_id].trip_status != TRIP_INIT &&
-            msg->ds_twr_data[tx_spec->data_slot_id].trip_status != TRIP_START) {
-            //Send packet to Initialise/Reset trip
-            setup_next_trip(msg->tx_spec.data_slot_id, 0, TRIP_INIT);
-
-        } else if (msg->ds_twr_data[tx_spec->data_slot_id].trip_status == DS_TWR_SOL_RPT) {
-            if (range_pkt2send[msg->tx_spec.data_slot_id].trip_status == DS_TWR_SOL_RPT ||
-                range_pkt2send[msg->tx_spec.data_slot_id].trip_status == DS_TWR_SOL) {
-                // record the tprop in the pkt for calibration
-
-                //we stay in this state unless we receive command to do otherwise
-                range_pkt2send[msg->tx_spec.data_slot_id] = msg->ds_twr_data[tx_spec->data_slot_id];
-                setup_next_trip(msg->tx_spec.data_slot_id, receive_tstamp, DS_TWR_SOL_RPT);
-            }
-        } else {
-            range_pkt2send[msg->tx_spec.data_slot_id] = msg->ds_twr_data[tx_spec->data_slot_id];
-            setup_next_trip(msg->tx_spec.data_slot_id, receive_tstamp, msg->ds_twr_data[tx_spec->data_slot_id].trip_status+1);    
-        }
-    }
-}
-
-//Tag update Method
-void update_tag(struct message_spec_s *msg, struct tx_spec_s *tx_spec, int64_t receive_tstamp)
-{
-
 }

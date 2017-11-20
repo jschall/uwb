@@ -29,27 +29,26 @@
 #include <stdio.h>
 #include <math.h>
 #include <stdbool.h>
-#include <modules/dw1000/dw1000.h>
+#include <modules/driver_dw1000/dw1000.h>
 
 #define DW1000_CAL_CHAN_NUM DW1000_CHANNEL_7
 #define TRUE_RANGE  0.3f
 #define DW1000_CAL_PRF DW1000_PRF_64MHZ
 #define MAX_CAL_SAMPLES 1000
 struct message_spec_s;
-enum trip_statuses {
-    TRIP_INIT = 0,
-    TRIP_START,
-    TRIP_REPLY,
-    SS_TWR_SOL,
-    DS_TWR_SOL,
-    DS_TWR_SOL_RPT
+struct tx_spec_s;
+
+enum twr_statuses {
+    TWR_RESET = 0,
+    TWR_INIT,
+    TWR_LOCKED
 };
 
 struct __attribute__((packed)) ds_twr_data_s {
     uint8_t trip_id;        //ID of the trip we are making
-    uint8_t trip_status;
-    int64_t transmit_tstamps[3];
-    int64_t receive_tstamps[3];
+    uint8_t twr_status;
+    int64_t treply2;
+    int64_t tround1;
     float tprop;    //this will be in meters
 };
 
@@ -60,8 +59,9 @@ struct range_sol_s {
     float tprop;    //this will be in meters
 };
 
-void twr_init(uint8_t _my_node_id, uint8_t _my_slot_id);
-void setup_ranging_pkt_for_tx(uint8_t num_online, int64_t transmit_tstamp, struct message_spec_s *msg);
+void twr_init(void);
+void update_twr_tx(struct message_spec_s *msg, int64_t transmit_tstamp);
+void update_twr_rx(struct message_spec_s *msg, struct tx_spec_s *tx_spec, int64_t receive_tstamp);
 
 float get_result(uint8_t id);
 float get_sample_dat(uint8_t id1, uint8_t id2);
