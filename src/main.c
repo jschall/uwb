@@ -18,15 +18,14 @@
 #include "hal.h"
 #include <modules/timing/timing.h>
 #include <common/helpers.h>
-#include <modules/dw1000/dw1000.h>
+#include <modules/driver_dw1000/dw1000.h>
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
 #include <modules/param/param.h>
 #include <modules/uavcan/uavcan.h>
 #include "tdma.h"
-#include <errno.h>
-
+#include <modules/lpwork_thread/lpwork_thread.h>
 
 /*
 PARAM_DEFINE_FLOAT32_PARAM_STATIC(param_a, "a", 4, 3, 5)
@@ -49,24 +48,10 @@ PARAM_DEFINE_FLOAT32_PARAM_STATIC(param_anchor_pos_x, "ANCHOR_POS_X", 0.0f, -500
 PARAM_DEFINE_FLOAT32_PARAM_STATIC(param_anchor_pos_y, "ANCHOR_POS_Y", 0.0f, -500.0f, 500.0f)
 PARAM_DEFINE_FLOAT32_PARAM_STATIC(param_anchor_pos_z, "ANCHOR_POS_Z", 0.0f, -500.0f, 500.0f)
 
-__attribute__((used))
-caddr_t _sbrk(struct _reent *r, int incr)
-{
-#if CH_CFG_USE_MEMCORE
-  void *p;
+struct worker_thread_s uwb_listener_thread;
 
-  chDbgCheck(incr >= 0);
-  p = chHeapAlloc(NULL, (size_t)incr);
-  if (p == NULL) {
-    __errno_r(r) = ENOMEM;
-    return (caddr_t)-1;
-  }
-  return (caddr_t)p;
-#else
-  (void)incr;
-  __errno_r(r) = ENOMEM;
-  return (caddr_t)-1;
-#endif
+RUN_ON(WORKER_THREADS_START) {
+    worker_thread_init(&uwb_listener_thread,"uwb_Listener", 1024, LOWPRIO);      //All timer repeatitive task go in here
 }
 
 
@@ -82,13 +67,16 @@ int main(void) {
     tx_spec_init.data_slot_id = 255;
 
     if (param_tdma_tx_type == TDMA_SUPERVISOR) { // we are tdma supervisor
-        tdma_supervisor_init(tx_spec_init, param_tdma_tbody_id);
-        tdma_supervisor_run();
+        tdma_supervisor_init(tx_spec_init, param_tdma_tbody_id, &lpwork_thread, &uwb_listener_thread);
     } else if (param_tdma_tx_type == TDMA_SUBORDINATE) {
-        tdma_subordinate_init(tx_spec_init);
-        tdma_subordinate_run();
+        tdma_subordinate_init(tx_spec_init, param_ant_delay);
+        //tdma_subordinate_run();
     } else {
         tdma_sniffer_run();
     }
+    while(true) {
+        chThdSleepMilliseconds(10000);
+    }
     return 0;
+
 }

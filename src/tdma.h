@@ -3,7 +3,7 @@
 #include "hal.h"
 #include <modules/timing/timing.h>
 #include <common/helpers.h>
-#include <modules/dw1000/dw1000.h>
+#include <modules/driver_dw1000/dw1000.h>
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
@@ -19,7 +19,7 @@
 #define SLOT_SIZE 4000ULL    //8ms
 #define TOTAL_AVAILABLE_SLOTS 10
 #define MAX_NUM_DEVICES TOTAL_AVAILABLE_SLOTS
-#define INITIAL_BACKOFF_MASK 0x7
+#define INITIAL_BACKOFF_MASK 0x1
 //TODO: Implement Supervisor switch in case of timeout
 //TODO: Implement Delayed Receive for more failsafe receive
 
@@ -41,6 +41,15 @@ enum tdma_slots {
     START_SLOT,
     DATA_SLOT,
     REQUEST_SLOT
+};
+
+enum {
+    SEND_NONE,
+    SEND_RTS,
+    SEND_CTS,
+    SEND_DS,
+    SEND_DATA,
+    SEND_DACK
 };
 
 enum tx_types {
@@ -89,9 +98,8 @@ struct __attribute__((packed)) body_comm_pkt {
     uint8_t target_body_id;
 };
 
-void tdma_supervisor_init(struct tx_spec_s _tx_spec, uint8_t target_body_id);
-void tdma_subordinate_init(struct tx_spec_s _tx_spec);
-void tdma_supervisor_run(void);
+void tdma_supervisor_init(struct tx_spec_s _tx_spec, uint8_t target_body_id, struct worker_thread_s* worker_thread, struct worker_thread_s* listener_thread);
+void tdma_subordinate_init(struct tx_spec_s _tx_spec, uint32_t ant_delay);
 void tdma_subordinate_run(void);
 void tdma_sniffer_run(void);
 bool is_medium_access_msg(struct message_spec_s *_msg);

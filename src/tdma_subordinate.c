@@ -16,7 +16,7 @@ static struct message_spec_s msg;
  * @param[in] _tx_spec  transceiver specific initial specifications
  * @param[in] target_body_id body id with which the rangin will be done
  */
-void tdma_subordinate_init(struct tx_spec_s _tx_spec)
+void tdma_subordinate_init(struct tx_spec_s _tx_spec, uint32_t ant_delay)
 {
 
     //seed random number generator
@@ -26,14 +26,14 @@ void tdma_subordinate_init(struct tx_spec_s _tx_spec)
     tx_spec.body_id = _tx_spec.node_id;
     tx_spec.type = TDMA_SUBORDINATE;
 
-    dw1000_init(&uwb_instance, 3, BOARD_PAL_LINE_SPI3_UWB_CS, BOARD_PAL_LINE_UWB_NRST, tx_spec.ant_delay);
+    dw1000_init(&uwb_instance, 3, BOARD_PAL_LINE_SPI3_UWB_CS, BOARD_PAL_LINE_UWB_NRST, ant_delay);
 
     dw1000_rx_enable(&uwb_instance);
 }
 
-/*
-    Subordinate Runner
-*/
+//
+//    Subordinate Runner
+//
 static void req_data_slot(struct dw1000_rx_frame_info_s rx_info)
 {
     static uint8_t skip_req;
@@ -88,7 +88,7 @@ static void update_subordinate(void)
             if (!data_slot_allocated && tdma_spec.req_node_id == tx_spec.node_id) {
                 tx_spec.data_slot_id = tdma_spec.res_data_slot;
                 data_slot_allocated = true;
-                twr_init(tx_spec.node_id, tx_spec.data_slot_id);
+                twr_init();
             }
             //check if we should ask for data slot, if yes request
             if(!data_slot_allocated) {
@@ -102,9 +102,9 @@ static void update_subordinate(void)
         //Also setup ranging request of our own
         if (data_slot_allocated) {
             if (tx_spec.type == TAG) {
-                update_tag(&msg, &tx_spec, rx_info.timestamp);
+                //update_tag(&msg, &tx_spec, rx_info.timestamp);
             } else {
-                update_anchor(&msg, &tx_spec, rx_info.timestamp);
+                //update_anchor(&msg, &tx_spec, rx_info.timestamp);
             }
         }
     }
@@ -120,11 +120,11 @@ static void update_subordinate(void)
             //pack message
             msg.tdma_spec = tdma_spec;
             msg.tx_spec = tx_spec;
-            setup_ranging_pkt_for_tx(tdma_spec.num_slots, scheduled_time, &msg);
+            //setup_ranging_pkt_for_tx(tdma_spec.num_slots, scheduled_time, &msg);
             //send ranging pkt
             if (dw1000_scheduled_transmit(&uwb_instance, scheduled_time, 
                            MSG_HEADER_SIZE + MSG_PAYLOAD_SIZE(5), &msg, true)) {
-                tx_spec.pkt_cnt++;
+                //tx_spec.pkt_cnt++;
             }
             transmit_scheduled = true;
         }

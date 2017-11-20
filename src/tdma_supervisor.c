@@ -1,6 +1,7 @@
 #include "tdma.h"
 #include <stdlib.h>
 
+//Module specifiers
 static struct tx_spec_s tx_spec;
 static struct dw1000_instance_s uwb_instance;
 static struct tdma_spec_s tdma_spec;
@@ -9,30 +10,101 @@ static struct tx_spec_s tx_spec;
 static uint64_t slot_start_timestamp;
 static struct message_spec_s msg;
 
-static bool started_acquiring_medium;
-static uint8_t rts_backoff_cnt;
-static uint8_t rts_backoff_mask;
-static uint32_t defer_acquire_medium_tstart;
-static bool schedule_dack;
-static uint8_t rts_received_sleep;
+
+//Debug States
 static uint16_t num_successful_recieves;
 static uint16_t num_successful_transmits;
-static uint8_t start_transmit_delay;
 static uint16_t num_rts_received;
 static uint16_t num_cts_received;
 static uint16_t num_ds_received;
 static uint16_t num_dack_received;
 static uint16_t num_rx_ovrr;
+static uint16_t num_rts_sent;
+static uint16_t num_cts_sent;
+static uint32_t last_data_sent = 0;
+static uint32_t data_period = 0;
+static float range;
+static bool new_range;
 
-/*
+static struct worker_thread_timer_task_s main_task;
+static struct worker_thread_timer_task_s status_task;
 
-    Supervisor Methods
+//TRX State handles
+static uint32_t last_receive;
+static uint32_t last_transmit;
+static bool transmit_complete;
+static uint8_t transmit_state;
 
-*/
+//Collision avoidance media acquire handles
+static uint8_t rts_received_sleep;
+static bool started_acquiring_medium;
+static uint8_t rts_backoff_cnt;
+static uint8_t rts_backoff_mask;
+static uint32_t defer_acquire_medium_tstart;
+static bool schedule_dack;
+static bool receive_acquiring_medium;
+
+static void handle_receive_event(void);
+static void transmit_loop(struct worker_thread_timer_task_s* task);
+static void super_update_start_slot(void);
+static void start_acquiring_medium(void);
+
+
+#define RX_TIMEOUT 20   //20ms Dw1000 timeout
+#define TX_TIMEOUT 2    //2ms Dw1000 Tx timeout
+
+//
+//    Supervisor Methods
+
+ 
+static void dw1000_sys_status_handler(size_t msg_size, const void* buf, void* ctx)
+{
+    (void)msg_size;
+    (void)buf;
+    (void)ctx;
+    if (dw1000_get_status(&uwb_instance) & (DW1000_IRQ_MASK(DW1000_SYS_STATUS_RXFCG) | DW1000_IRQ_MASK(DW1000_SYS_STATUS_RXOVRR))) {
+        handle_receive_event();
+        dw1000_clear_status(&uwb_instance, DW1000_IRQ_MASK(DW1000_SYS_STATUS_RXFCG) | DW1000_IRQ_MASK(DW1000_SYS_STATUS_RXOVRR));
+        last_receive = millis();
+    }
+    if (dw1000_get_status(&uwb_instance) & DW1000_IRQ_MASK(DW1000_SYS_STATUS_TXFRS)) {
+        transmit_complete = true;
+        dw1000_clear_status(&uwb_instance, DW1000_IRQ_MASK(DW1000_SYS_STATUS_TXFRS));
+    }
+}
+
+static void status_checker(struct worker_thread_timer_task_s* task)
+{
+    (void)task;
+    //If we haven't received anything for more than RX_TIMEOUT we go in manually to check if we are in an error state
+    if ((millis() - last_receive) > RX_TIMEOUT) {
+        handle_receive_event();
+    }
+    if ((millis() - last_transmit) > TX_TIMEOUT) {
+        transmit_complete = true;
+    }
+    if(started_acquiring_medium) {
+        defer_acquire_medium_tstart = millis();
+    }
+
+    if (((millis() - defer_acquire_medium_tstart) >= DEFER_TIME)) {
+        receive_acquiring_medium = true;
+    }
+    if (new_range) {
+        if(range < 100.0f) {
+            uavcan_send_debug_keyvalue("Range", range);
+        }
+        new_range = false;
+    }
+
+    if (((millis() - defer_acquire_medium_tstart) >= 2*DEFER_TIME)) {
+        start_acquiring_medium();
+    }
+}
 /*
     TDMA Init
 */
-void tdma_supervisor_init(struct tx_spec_s _tx_spec, uint8_t target_body_id)
+void tdma_supervisor_init(struct tx_spec_s _tx_spec, uint8_t target_body_id, struct worker_thread_s* worker_thread, struct worker_thread_s* listener_thread)
 {
     //TDMA Init
     tdma_spec.slot_size = SLOT_SIZE;
@@ -45,13 +117,13 @@ void tdma_supervisor_init(struct tx_spec_s _tx_spec, uint8_t target_body_id)
     tdma_spec.target_body_id = target_body_id;
 
     //Medium Access init
-    started_acquiring_medium = false;
+    started_acquiring_medium = true;
     rts_backoff_mask = INITIAL_BACKOFF_MASK;
     rts_backoff_cnt = 0;
     defer_acquire_medium_tstart = 0;
     schedule_dack = false;
     rts_received_sleep = 0;
-    start_transmit_delay = 0;
+    receive_acquiring_medium = true;
 
     num_successful_recieves = 0;
     num_successful_transmits = 0;
@@ -59,6 +131,10 @@ void tdma_supervisor_init(struct tx_spec_s _tx_spec, uint8_t target_body_id)
     num_cts_received = 0;
     num_ds_received = 0;
     num_dack_received = 0;
+    last_receive = 0;
+    last_transmit = 0;
+    num_cts_sent = 0;
+    num_rts_sent = 0;
 
     memcpy(&tx_spec, &_tx_spec, sizeof(tx_spec));
     tx_spec.body_id = _tx_spec.node_id;
@@ -67,9 +143,24 @@ void tdma_supervisor_init(struct tx_spec_s _tx_spec, uint8_t target_body_id)
     srand(((uint32_t)tx_spec.node_id) | ((uint32_t)tx_spec.body_id<<16));
 
     memset(slot_id_list, 0, sizeof(slot_id_list));
-    twr_init(tx_spec.node_id, 0);
+    twr_init();
+
+    //Setup DW1000 to our needs
     dw1000_init(&uwb_instance, 3, BOARD_PAL_LINE_SPI3_UWB_CS, BOARD_PAL_LINE_UWB_NRST, tx_spec.ant_delay);
 
+    dw1000_setup_irq(&uwb_instance, FW_EXT_IRQ_PORT(GPIOA), 1, DW1000_IRQ_MASK(DW1000_SYS_STATUS_RXFCG) | 
+                                                               DW1000_IRQ_MASK(DW1000_SYS_STATUS_RXOVRR) |
+                                                               DW1000_IRQ_MASK(DW1000_SYS_STATUS_TXFRS));
+    //register irq listener task
+
+    pubsub_init_and_register_listener(uwb_instance.irq_topic, &uwb_instance.irq_listener, dw1000_sys_status_handler, NULL);
+    worker_thread_add_listener_task(listener_thread, &uwb_instance.irq_listener_task, &uwb_instance.irq_listener);
+    worker_thread_add_timer_task(worker_thread, &status_task, status_checker, NULL, MS2ST(2), true);
+    worker_thread_add_timer_task(worker_thread, &main_task, transmit_loop, NULL, US2ST(SLOT_SIZE/4), true);
+
+    //since we are supervisor our data_slot_id is 0
+    tx_spec.data_slot_id = 0;
+    //enable rx now
     dw1000_rx_enable(&uwb_instance);
 }
 
@@ -80,13 +171,6 @@ void tdma_supervisor_init(struct tx_spec_s _tx_spec, uint8_t target_body_id)
  */
 static void super_update_start_slot(void)
 {
-    if (start_transmit_delay == 0) {
-        return;
-    } else if (start_transmit_delay != 1) {
-        start_transmit_delay--;
-        return;
-    }
-    start_transmit_delay = 0;
     struct message_spec_s msg;
     tdma_spec.slot_size = SLOT_SIZE;
     tdma_spec.cnt++;
@@ -101,11 +185,16 @@ static void super_update_start_slot(void)
 
     uint64_t scheduled_time = (dw1000_get_sys_time(&uwb_instance)+ARB_TIME_SYS_TICKS)&0xFFFFFFFFFFFFFE00ULL;
 
-    setup_ranging_pkt_for_tx(tdma_spec.num_slots, scheduled_time, &msg);
-    
+    update_twr_tx(&msg, scheduled_time+tx_spec.ant_delay);
+
     if(!dw1000_scheduled_transmit(&uwb_instance, scheduled_time, 
         MSG_HEADER_SIZE + MSG_PAYLOAD_SIZE(5), &msg, true)) {
         uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Super", "Failed to transmit Start!");
+    } else {
+        //tranmit loop waits until DACK is received
+        transmit_state = SEND_NONE;
+        transmit_complete = false;
+        last_transmit = millis();
     }
 }
 
@@ -146,13 +235,17 @@ static void handle_request_slot(void)
 
 // Contention based scheme for InterBody communication
 
-/*
-    Do Contention based medium access, will be initiated by a supervisor on the
-    body to take control of the bus, so that it can talk to opposing body or do 
-    antenna delay calibration routine.
-*/
+//
+//    Do Contention based medium access, will be initiated by a supervisor on the
+//    body to take control of the bus, so that it can talk to opposing body or do 
+//    antenna delay calibration routine.
+
 static void try_acquiring_medium(void)
 {
+    volatile static uint32_t test, test2;
+    test = rts_backoff_mask;
+    test = rts_backoff_cnt;
+    test2 = transmit_state;
     if (rts_received_sleep != 0) {
         //don't send rts for now
         rts_received_sleep--;
@@ -162,14 +255,12 @@ static void try_acquiring_medium(void)
         rts_backoff_cnt--;
         return;
     }
-    struct body_comm_pkt pkt;
-    pkt.target_body_id = tdma_spec.target_body_id;
-    pkt.body_id = tx_spec.body_id;
-    pkt.magic = RTS_MAGIC;
-    dw1000_disable_transceiver(&uwb_instance);
-    dw1000_transmit(&uwb_instance, sizeof(struct body_comm_pkt), &pkt, true);
+    if (transmit_state != SEND_NONE) {
+        return;
+    }
+    transmit_state = SEND_RTS;
     //update backoff cnt for next try
-    rts_backoff_cnt = (rand() & rts_backoff_mask)*4;
+    rts_backoff_cnt = (1 + (rand() & rts_backoff_mask))*4;
     rts_backoff_mask = (rts_backoff_mask << 1) | 1;
 }
 
@@ -181,7 +272,7 @@ static void try_acquiring_medium(void)
 static void start_acquiring_medium(void)
 {
     rts_backoff_mask = INITIAL_BACKOFF_MASK;
-    rts_backoff_cnt = (rand() & INITIAL_BACKOFF_MASK)*4;
+    rts_backoff_cnt = (1 + (rand() & INITIAL_BACKOFF_MASK))*4;
     try_acquiring_medium();
     started_acquiring_medium = true;
 }
@@ -194,51 +285,41 @@ static void start_acquiring_medium(void)
 static void stop_acquiring_medium(void)
 {
     rts_backoff_mask = INITIAL_BACKOFF_MASK;
-    rts_backoff_cnt = (rand() & INITIAL_BACKOFF_MASK)*4;
-    defer_acquire_medium_tstart = millis();
+    rts_backoff_cnt = (1 + (rand() & INITIAL_BACKOFF_MASK))*4;
     started_acquiring_medium = false;
+    defer_acquire_medium_tstart = millis();
 }
 
 /*
     Handle Media Access messages sent by other supervisors.
 */
-static void handle_comm_req_slot(struct body_comm_pkt *pkt) {
+static void handle_comm_req_slot(struct body_comm_pkt *pkt)
+{
     switch (pkt->magic) {
         case RTS_MAGIC:
             // Ready to Send Received check if it's for us
-            if (pkt->target_body_id == tx_spec.body_id) {
-                //send clear to send pkt
-                pkt->magic = CTS_MAGIC;
-                pkt->target_body_id = pkt->body_id;
-                pkt->body_id = tx_spec.body_id;
-                dw1000_disable_transceiver(&uwb_instance);
-                chThdSleepMicroseconds(SLOT_SIZE/4);
-                dw1000_transmit(&uwb_instance, sizeof(struct body_comm_pkt), pkt, true);
+            if (pkt->target_body_id == tx_spec.body_id && receive_acquiring_medium) {
+                transmit_state = SEND_CTS;
             }
             rts_received_sleep = 4; //sleep for 4 loop cycles
             num_rts_received++;
             break;
         case CTS_MAGIC:
             // Clear To Send Received ACK with Data Send
-            if (pkt->target_body_id == tx_spec.body_id) {
-                //send clear to send pkt
-                pkt->magic = DS_MAGIC;
-                pkt->target_body_id = pkt->body_id;
-                pkt->body_id = tx_spec.body_id;
-                dw1000_disable_transceiver(&uwb_instance);
-                chThdSleepMicroseconds(SLOT_SIZE/4);
-                dw1000_transmit(&uwb_instance, sizeof(struct body_comm_pkt), pkt, true);
+            if (pkt->target_body_id == tx_spec.body_id && receive_acquiring_medium) {
+                transmit_state = SEND_DS;
             }
             num_cts_received++;
-            //start transmit
-            start_transmit_delay = 5;
             // We have have won the contention, go silent until next cycle
+            receive_acquiring_medium = false;
             stop_acquiring_medium();
             break;
         case DS_MAGIC:
             // Someone has won the contention, go silent until next cycle
-            start_transmit_delay = 0;
-            stop_acquiring_medium();
+            if(started_acquiring_medium) {
+                stop_acquiring_medium();
+            }
+            receive_acquiring_medium = false;
             num_ds_received++;
             break;
         case DACK_MAGIC:
@@ -249,6 +330,7 @@ static void handle_comm_req_slot(struct body_comm_pkt *pkt) {
             } else {
                 num_successful_transmits++;
             }
+            receive_acquiring_medium = true;
             num_dack_received++;
             break;
         default:
@@ -257,14 +339,14 @@ static void handle_comm_req_slot(struct body_comm_pkt *pkt) {
 }
 
 /*
-    Regular data read update method, any data received goes through
+    Regular data receive event handler, any data received goes through
     this method.
 */
-static void update_data_slot(void)
+static void handle_receive_event(void)
 {
     //reset msg
     memset(&msg, 0, sizeof(msg));
-    //We shall receive a data packet sometime in the middle of this sleep
+
     struct dw1000_rx_frame_info_s rx_info = dw1000_receive(&uwb_instance, sizeof(msg), &msg);
     //Handle Data Packet
     if (rx_info.err_code == DW1000_RX_ERROR_RXOVRR) {
@@ -279,89 +361,129 @@ static void update_data_slot(void)
                 msg.tx_spec.body_id == tx_spec.body_id) {
                 //handle intra module slot request
                 handle_request_slot();
-            } else if (tx_spec.type == TAG) {
-                update_tag(&msg, &tx_spec, rx_info.timestamp);
-            } else {
-                update_anchor(&msg, &tx_spec, rx_info.timestamp);
             }
+            //TODO: calibration routine
         } else if (msg.tdma_spec.target_body_id == tx_spec.body_id) {
             //We are receiving data from a body
             schedule_dack = true;
+            //morph the slot start timestamp based on the last received packet from body
             slot_start_timestamp = rx_info.timestamp - DW1000_SID2ST(msg.tx_spec.data_slot_id);
+            update_twr_rx(&msg, &tx_spec, rx_info.timestamp);
+            new_range = true;
+            range = msg.ds_twr_data[0].tprop;
         } else {
             //Someone is talking and its not to us, go to sleep
             //if we haven't
             if (started_acquiring_medium) {
+                receive_acquiring_medium = false;
                 stop_acquiring_medium();
             }
         }
     }
+}
+
+
+//Sends out scheduled transmits
+static void transmit_loop(struct worker_thread_timer_task_s* task)
+{
+    (void)task;
+    static uint32_t last_perf_print = 0, last_successful_recieves = 0, perf_cnt = 0;
+    static uint64_t last_us, avg_period = 0, max_period = 999999, curr_period;
+    perf_cnt++;
+    //Transmit Loop Perf Measurement
+    curr_period = data_period;
+    avg_period += curr_period;
+    if (curr_period < max_period) {
+        max_period = curr_period;
+    }
+    last_us = micros();
+    if ((millis() - last_perf_print) > 5000) {
+        uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "\nSuper PERF",
+            "\nPERIOD: %lu/%lu RXOVRR: %d", (uint32_t)(avg_period/perf_cnt), (uint32_t)max_period, num_rx_ovrr);
+        uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Super PERF",
+            "NID:%x TX: %d RX: %d Rate: %d RTS: %d CTS: %d/%d DS: %d/%d DACK: %d", 
+            tx_spec.node_id,
+            num_successful_transmits, num_successful_recieves,
+            (num_successful_recieves - last_successful_recieves)/5,
+            num_rts_received, num_rts_sent, num_cts_received, num_cts_sent, num_ds_received, num_dack_received);
+
+        last_successful_recieves = num_successful_recieves;
+        last_perf_print = millis();
+        perf_cnt = 0;
+        max_period = 9999999;
+        avg_period = 0;
+    }
+
     if (schedule_dack) {
         //check if its fine to setup DACK transmit
         if ((dw1000_get_sys_time(&uwb_instance) - slot_start_timestamp) >= 
             (DW1000_SID2ST(6) - ARB_TIME_SYS_TICKS)) {
-            struct body_comm_pkt pkt;
-            //send clear to send pkt
-            pkt.magic = DACK_MAGIC;
-            //This is for everyone to consume
-            pkt.target_body_id = tdma_spec.target_body_id;
-            pkt.body_id = tx_spec.body_id;
-            dw1000_disable_transceiver(&uwb_instance);
-            dw1000_transmit(&uwb_instance, sizeof(struct body_comm_pkt), &pkt, false);
-            chThdSleepMicroseconds(SLOT_SIZE/4);
-            dw1000_rx_enable(&uwb_instance);
+            num_successful_recieves++;
+            //this is an important response and trumps over everything else
+            transmit_state = SEND_DACK;
             //also try acquiring medium
             start_acquiring_medium();
             schedule_dack = false;
-            num_successful_recieves++;
         }
     }
-}
 
-/*
-    Main Loop for Supervisor
-*/
-void tdma_supervisor_run(void)
-{
-    tx_spec.data_slot_id = 0;
-    uint32_t last_perf_print = 0, last_successful_recieves = 0, perf_cnt = 0;
-    uint64_t last_us, avg_period = 0, max_period = 0, curr_period;
-    while (true) {
-        perf_cnt++;
-        update_data_slot();
-        super_update_start_slot();
-
-        //Perf Measurement
-        curr_period = micros() - last_us;
-        avg_period += curr_period;
-        if (curr_period > max_period) {
-            max_period = curr_period;
+    struct body_comm_pkt pkt;
+    if (transmit_complete) {
+        switch(transmit_state) {
+            case SEND_RTS:
+                num_rts_sent++;
+                pkt.target_body_id = tdma_spec.target_body_id;
+                pkt.body_id = tx_spec.body_id;
+                pkt.magic = RTS_MAGIC;
+                dw1000_disable_transceiver(&uwb_instance);
+                dw1000_transmit(&uwb_instance, sizeof(struct body_comm_pkt), &pkt, true);
+                last_transmit = millis();
+                transmit_state = SEND_NONE;
+                transmit_complete = false;
+                break;
+            case SEND_CTS:
+                data_period = micros() - last_data_sent;
+                num_cts_sent++;
+                pkt.target_body_id = tdma_spec.target_body_id;
+                pkt.body_id = tx_spec.body_id;
+                pkt.magic = CTS_MAGIC;
+                dw1000_disable_transceiver(&uwb_instance);
+                dw1000_transmit(&uwb_instance, sizeof(struct body_comm_pkt), &pkt, true);
+                last_transmit = millis();
+                transmit_state = SEND_NONE;
+                transmit_complete = false;
+                break;
+            case SEND_DS:
+                pkt.target_body_id = tdma_spec.target_body_id;
+                pkt.body_id = tx_spec.body_id;
+                pkt.magic = DS_MAGIC;
+                dw1000_disable_transceiver(&uwb_instance);
+                dw1000_transmit(&uwb_instance, sizeof(struct body_comm_pkt), &pkt, true);
+                last_transmit = millis();
+                //While we send DS activate data transmission wait loop as well
+                transmit_state = SEND_DATA;
+                transmit_complete = false;
+                break;
+            case SEND_DATA:
+                last_data_sent = micros();
+                super_update_start_slot();
+                break;
+            case SEND_DACK:
+                pkt.target_body_id = tdma_spec.target_body_id;
+                pkt.body_id = tx_spec.body_id;
+                pkt.magic = DACK_MAGIC;
+                dw1000_disable_transceiver(&uwb_instance);
+                dw1000_transmit(&uwb_instance, sizeof(struct body_comm_pkt), &pkt, true);
+                last_transmit = millis();
+                transmit_state = SEND_NONE;
+                transmit_complete = false;
+                break;
+            case SEND_NONE:
+                break;
         }
-        last_us = micros();
-
-        if ((millis() - last_perf_print) > 5000) {
-            uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "\nSuper PERF",
-                "\nPERIOD: %lu/%lu RXOVRR: %d", (uint32_t)(avg_period/perf_cnt), (uint32_t)max_period, num_rx_ovrr);
-            uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Super PERF",
-                "NID:%x TX: %d RX: %d Rate: %d RTS: %d CTS: %d DS: %d DACK: %d", 
-                tx_spec.node_id,
-                num_successful_transmits, num_successful_recieves,
-                (num_successful_recieves - last_successful_recieves)/5,
-                num_rts_received, num_cts_received, num_ds_received, num_dack_received);
-
-            last_successful_recieves = num_successful_recieves;
-            last_perf_print = millis();
-            perf_cnt = 0;
-            max_period = 0;
-            avg_period = 0;
-        }
-        //we only send start here incase of faillure or initialisation
-        if (((millis() - defer_acquire_medium_tstart) >= DEFER_TIME) || 
-            started_acquiring_medium) {
-            started_acquiring_medium = true;
-            try_acquiring_medium();
-        }
-        chThdSleepMicroseconds(SLOT_SIZE/4);
+    }
+    if (started_acquiring_medium) {
+        try_acquiring_medium();
     }
 }
 
