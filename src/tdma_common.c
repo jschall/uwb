@@ -2,7 +2,7 @@
 #include <stdlib.h>
 
 static bool send_log_now;
-static struct dw1000_instance_s uwb_instance;
+struct dw1000_instance_s uwb_instance;
 static struct message_spec_s msg;
 
 //
@@ -26,7 +26,7 @@ static void print_info(struct message_spec_s *_msg, struct dw1000_rx_frame_info_
     }
 
     if(is_medium_access_msg(_msg)) {
-        /*struct body_comm_pkt *pkt = (struct body_comm_pkt *)_msg;
+        struct body_comm_pkt *pkt = (struct body_comm_pkt *)_msg;
         switch (pkt->magic) {
             case RTS_MAGIC:
                 uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "RTS_MAGIC",
@@ -44,7 +44,7 @@ static void print_info(struct message_spec_s *_msg, struct dw1000_rx_frame_info_
                 uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "DACK_MAGIC",
                     "T:%.0f BID: %x TID: %x", rx_info.timestamp/UWB_SYS_TICKS, pkt->body_id, pkt->target_body_id);
                 break;
-        };*/
+        };
     }else {    //print_tdma_spec();
         for (uint8_t i = 0; i < _msg->tdma_spec.num_slots; i++) {
             uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "TWR", 

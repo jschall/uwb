@@ -61,6 +61,7 @@ int main(void) {
     struct tx_spec_s tx_spec_init;
     tx_spec_init.type = param_tdma_unit_type;
     tx_spec_init.node_id = unique_id[10];
+    tx_spec_init.body_id = param_tdma_body_id;
     tx_spec_init.ant_delay_cal = param_ant_delay_cal;
     tx_spec_init.ant_delay = param_ant_delay;
     tx_spec_init.pkt_cnt = 0;
@@ -69,8 +70,7 @@ int main(void) {
     if (param_tdma_tx_type == TDMA_SUPERVISOR) { // we are tdma supervisor
         tdma_supervisor_init(tx_spec_init, param_tdma_tbody_id, &lpwork_thread, &uwb_listener_thread);
     } else if (param_tdma_tx_type == TDMA_SUBORDINATE) {
-        tdma_subordinate_init(tx_spec_init, param_ant_delay);
-        //tdma_subordinate_run();
+        tdma_subordinate_init(tx_spec_init, &lpwork_thread, &uwb_listener_thread);
     } else {
         tdma_sniffer_run();
     }

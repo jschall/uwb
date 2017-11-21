@@ -4,8 +4,8 @@
 
 static uint8_t trip_id[MAX_NUM_DEVICES];
 static uint8_t twr_status[MAX_NUM_DEVICES];
-static float calib_data[3][3];
-static uint16_t sample_count[3][3];
+static float calib_data[5][5];
+static uint16_t sample_count[5][5];
 
 //Contains list of data_sets for ranging
 static int64_t rx_tstamp_list[MAX_NUM_DEVICES][2];
@@ -207,3 +207,23 @@ float get_sample_dat(uint8_t id1, uint8_t id2)
 {
     return calib_data[id1][id2];
 }
+
+void update_twr_cal_tx(struct message_spec_s *msg, int64_t transmit_tstamp)
+{
+    update_twr_tx(msg, transmit_tstamp);
+}
+
+void update_twr_cal_rx(struct message_spec_s *msg, struct tx_spec_s *tx_spec, int64_t receive_tstamp)
+{
+    for (uint8_t i = 0; i < MAX_NUM_DEVICES; i++) {
+        if (msg->ds_twr_data[i].twr_status == TWR_LOCKED) {
+            push_calib_data(msg->ds_twr_data[i].tprop, msg->tx_spec.data_slot_id, i);
+        }
+    }
+    update_twr_rx(msg, tx_spec, receive_tstamp);
+    if (twr_status[msg->tx_spec.data_slot_id] == TWR_LOCKED) {
+        //push our own range as well
+        push_calib_data(range[msg->tx_spec.data_slot_id], tx_spec->data_slot_id, msg->tx_spec.data_slot_id);
+    }
+}
+

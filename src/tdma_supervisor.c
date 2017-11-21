@@ -3,7 +3,6 @@
 
 //Module specifiers
 static struct tx_spec_s tx_spec;
-static struct dw1000_instance_s uwb_instance;
 static struct tdma_spec_s tdma_spec;
 static uint8_t slot_id_list[MAX_NUM_DEVICES];
 static struct tx_spec_s tx_spec;
@@ -23,6 +22,8 @@ static uint16_t num_rts_sent;
 static uint16_t num_cts_sent;
 static uint32_t last_data_sent = 0;
 static uint32_t data_period = 0;
+static uint32_t last_cal_init = 0;
+static uint32_t cal_period = 0;
 static float range;
 static bool new_range;
 
@@ -34,6 +35,7 @@ static uint32_t last_receive;
 static uint32_t last_transmit;
 static bool transmit_complete;
 static uint8_t transmit_state;
+static uint64_t last_start_send;
 
 //Collision avoidance media acquire handles
 static uint8_t rts_received_sleep;
@@ -48,6 +50,7 @@ static void handle_receive_event(void);
 static void transmit_loop(struct worker_thread_timer_task_s* task);
 static void super_update_start_slot(void);
 static void start_acquiring_medium(void);
+static void initiate_cal_run(void);
 
 
 #define RX_TIMEOUT 20   //20ms Dw1000 timeout
@@ -56,15 +59,15 @@ static void start_acquiring_medium(void);
 //
 //    Supervisor Methods
 
- 
+
 static void dw1000_sys_status_handler(size_t msg_size, const void* buf, void* ctx)
 {
     (void)msg_size;
     (void)buf;
     (void)ctx;
-    if (dw1000_get_status(&uwb_instance) & (DW1000_IRQ_MASK(DW1000_SYS_STATUS_RXFCG) | DW1000_IRQ_MASK(DW1000_SYS_STATUS_RXOVRR))) {
+    if (dw1000_get_status(&uwb_instance) & (DW1000_IRQ_MASK(DW1000_SYS_STATUS_LDEDONE) | DW1000_IRQ_MASK(DW1000_SYS_STATUS_RXOVRR))) {
         handle_receive_event();
-        dw1000_clear_status(&uwb_instance, DW1000_IRQ_MASK(DW1000_SYS_STATUS_RXFCG) | DW1000_IRQ_MASK(DW1000_SYS_STATUS_RXOVRR));
+        dw1000_clear_status(&uwb_instance, DW1000_IRQ_MASK(DW1000_SYS_STATUS_LDEDONE) | DW1000_IRQ_MASK(DW1000_SYS_STATUS_RXOVRR));
         last_receive = millis();
     }
     if (dw1000_get_status(&uwb_instance) & DW1000_IRQ_MASK(DW1000_SYS_STATUS_TXFRS)) {
@@ -78,7 +81,14 @@ static void status_checker(struct worker_thread_timer_task_s* task)
     (void)task;
     //If we haven't received anything for more than RX_TIMEOUT we go in manually to check if we are in an error state
     if ((millis() - last_receive) > RX_TIMEOUT) {
-        handle_receive_event();
+        if (dw1000_get_status(&uwb_instance) & DW1000_IRQ_MASK(DW1000_SYS_STATUS_RXOVRR)) {
+            dw1000_disable_transceiver(&uwb_instance);
+            dw1000_swap_rx_buffers(&uwb_instance);
+            dw1000_rx_softreset(&uwb_instance);
+            // Receiver must be reset to exit errored state
+            dw1000_rx_enable(&uwb_instance);
+        }
+        last_receive = millis();
     }
     if ((millis() - last_transmit) > TX_TIMEOUT) {
         transmit_complete = true;
@@ -108,8 +118,6 @@ void tdma_supervisor_init(struct tx_spec_s _tx_spec, uint8_t target_body_id, str
 {
     //TDMA Init
     tdma_spec.slot_size = SLOT_SIZE;
-    tdma_spec.tags_online = 0;
-    tdma_spec.anchors_online = 1;
     tdma_spec.res_data_slot = 0;
     tdma_spec.req_node_id = 0;
     tdma_spec.cnt = 0;
@@ -124,6 +132,7 @@ void tdma_supervisor_init(struct tx_spec_s _tx_spec, uint8_t target_body_id, str
     schedule_dack = false;
     rts_received_sleep = 0;
     receive_acquiring_medium = true;
+    last_start_send = 0;
 
     num_successful_recieves = 0;
     num_successful_transmits = 0;
@@ -148,7 +157,7 @@ void tdma_supervisor_init(struct tx_spec_s _tx_spec, uint8_t target_body_id, str
     //Setup DW1000 to our needs
     dw1000_init(&uwb_instance, 3, BOARD_PAL_LINE_SPI3_UWB_CS, BOARD_PAL_LINE_UWB_NRST, tx_spec.ant_delay);
 
-    dw1000_setup_irq(&uwb_instance, FW_EXT_IRQ_PORT(GPIOA), 1, DW1000_IRQ_MASK(DW1000_SYS_STATUS_RXFCG) | 
+    dw1000_setup_irq(&uwb_instance, FW_EXT_IRQ_PORT(GPIOA), 1, DW1000_IRQ_MASK(DW1000_SYS_STATUS_LDEDONE) | 
                                                                DW1000_IRQ_MASK(DW1000_SYS_STATUS_RXOVRR) |
                                                                DW1000_IRQ_MASK(DW1000_SYS_STATUS_TXFRS));
     //register irq listener task
@@ -185,8 +194,12 @@ static void super_update_start_slot(void)
 
     uint64_t scheduled_time = (dw1000_get_sys_time(&uwb_instance)+ARB_TIME_SYS_TICKS)&0xFFFFFFFFFFFFFE00ULL;
 
-    update_twr_tx(&msg, scheduled_time+tx_spec.ant_delay);
-
+    if (tx_spec.ant_delay_cal) {
+        update_twr_cal_tx(&msg, scheduled_time + tx_spec.ant_delay);
+    } else {
+        update_twr_tx(&msg, scheduled_time + tx_spec.ant_delay);
+    }
+    last_start_send = scheduled_time;
     if(!dw1000_scheduled_transmit(&uwb_instance, scheduled_time, 
         MSG_HEADER_SIZE + MSG_PAYLOAD_SIZE(5), &msg, true)) {
         uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Super", "Failed to transmit Start!");
@@ -219,11 +232,6 @@ static void handle_request_slot(void)
         return;
     }
 
-    if (msg.tx_spec.type == TAG) {
-        tdma_spec.tags_online++;
-    } else {
-        tdma_spec.anchors_online++;
-    }
     tdma_spec.req_node_id = msg.tx_spec.node_id;
     tdma_spec.res_data_slot = tdma_spec.num_slots;
     tdma_spec.num_slots++;
@@ -391,7 +399,7 @@ static void transmit_loop(struct worker_thread_timer_task_s* task)
     static uint64_t last_us, avg_period = 0, max_period = 999999, curr_period;
     perf_cnt++;
     //Transmit Loop Perf Measurement
-    curr_period = data_period;
+    curr_period = cal_period;
     avg_period += curr_period;
     if (curr_period < max_period) {
         max_period = curr_period;
@@ -482,8 +490,19 @@ static void transmit_loop(struct worker_thread_timer_task_s* task)
                 break;
         }
     }
-    if (started_acquiring_medium) {
+    if (started_acquiring_medium && !tx_spec.ant_delay_cal) {
         try_acquiring_medium();
+    } else if(tx_spec.ant_delay_cal) {
+        transmit_state = SEND_NONE;
+        initiate_cal_run();
     }
 }
 
+static void initiate_cal_run(void)
+{
+    if (transmit_complete && (dw1000_wrap_timestamp(dw1000_get_sys_time(&uwb_instance) - last_start_send) > DW1000_SID2ST(tdma_spec.num_slots+1))) {
+        super_update_start_slot();
+        cal_period = millis()-last_cal_init;
+        last_cal_init = millis();
+    }
+}

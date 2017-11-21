@@ -63,6 +63,9 @@ void twr_init(void);
 void update_twr_tx(struct message_spec_s *msg, int64_t transmit_tstamp);
 void update_twr_rx(struct message_spec_s *msg, struct tx_spec_s *tx_spec, int64_t receive_tstamp);
 
+//Calibration methods
+void update_twr_cal_tx(struct message_spec_s *msg, int64_t transmit_tstamp);
+void update_twr_cal_rx(struct message_spec_s *msg, struct tx_spec_s *tx_spec, int64_t receive_tstamp);
 float get_result(uint8_t id);
 float get_sample_dat(uint8_t id1, uint8_t id2);
 uint16_t get_sample_count(uint8_t id1, uint8_t id2);

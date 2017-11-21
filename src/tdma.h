@@ -1,4 +1,5 @@
 #pragma once
+
 #include "ch.h"
 #include "hal.h"
 #include <modules/timing/timing.h>
@@ -29,6 +30,8 @@
 #define ARB_TIME SLOT_SIZE/2
 #define ARB_TIME_SYS_TICKS ((uint64_t)(ARB_TIME*UWB_SYS_TICKS))
 #define DW1000_SID2ST(x) ((uint64_t)(((x)*(UWB_SYS_TICKS*SLOT_SIZE))))
+
+extern struct dw1000_instance_s uwb_instance;
 
 enum {
     RTS_MAGIC = 0xAF60,
@@ -65,8 +68,6 @@ enum tdma_types {
 
 struct __attribute__((packed)) tdma_spec_s {
     uint8_t num_slots;
-    uint8_t tags_online;
-    uint8_t anchors_online;
     uint8_t target_body_id;
     uint8_t res_data_slot;
     uint8_t req_node_id;
@@ -99,7 +100,9 @@ struct __attribute__((packed)) body_comm_pkt {
 };
 
 void tdma_supervisor_init(struct tx_spec_s _tx_spec, uint8_t target_body_id, struct worker_thread_s* worker_thread, struct worker_thread_s* listener_thread);
-void tdma_subordinate_init(struct tx_spec_s _tx_spec, uint32_t ant_delay);
+void tdma_subordinate_init(struct tx_spec_s _tx_spec, struct worker_thread_s* worker_thread, struct worker_thread_s* listener_thread);
 void tdma_subordinate_run(void);
 void tdma_sniffer_run(void);
+
+//Common methods between different tx types
 bool is_medium_access_msg(struct message_spec_s *_msg);
