@@ -1,16 +1,18 @@
 #include "twr.h"
 #include "tdma.h"
-
+#define SQR(x) ((x)*(x))
 
 static uint8_t trip_id[MAX_NUM_DEVICES];
 static uint8_t twr_status[MAX_NUM_DEVICES];
-static float calib_data[5][5];
+static int64_t calib_data[5][5];
 static uint16_t sample_count[5][5];
 
 //Contains list of data_sets for ranging
 static int64_t rx_tstamp_list[MAX_NUM_DEVICES][2];
 static int64_t tx_tstamp_list[MAX_NUM_DEVICES][2];
 static float range[MAX_NUM_DEVICES];
+static float body_pos[MAX_NUM_DEVICES][3];
+static float ant_delay;
 /*
     Common TWR methods
 */
@@ -29,10 +31,10 @@ void twr_init()
     memset(twr_status, 0, sizeof(twr_status));
 }
 
-static float do_ds_twr(uint8_t trip_id, int64_t tround1, int64_t treply2, int64_t receive_tstamp, uint8_t module_num)
+static int64_t do_ds_twr(uint8_t _trip_id, int64_t tround1, int64_t treply2, int64_t receive_tstamp, uint8_t module_num)
 {
-    uint64_t tround2, treply1;
-    switch(trip_id) {
+    int64_t tround2, treply1;
+    switch(_trip_id) {
         case 0:
             rx_tstamp_list[module_num][0] = receive_tstamp;
             tround2 = rx_tstamp_list[module_num][0] - tx_tstamp_list[module_num][1];
@@ -59,19 +61,23 @@ static float do_ds_twr(uint8_t trip_id, int64_t tround1, int64_t treply2, int64_
     tround2 = dw1000_wrap_timestamp(tround2);
     treply1 = dw1000_wrap_timestamp(treply1);
     if (twr_status[module_num] == TWR_LOCKED) {
+        if (tround2 > (int64_t)(2*MAX_NUM_DEVICES*SLOT_SIZE*UWB_SYS_TICKS) || treply1 > (int64_t)(2*MAX_NUM_DEVICES*SLOT_SIZE*UWB_SYS_TICKS)) {
+            twr_status[module_num] = TWR_RESET;
+            trip_id[module_num] = 0;
+        }
         int64_t tsum = tround1+tround2+treply1+treply2;
         if(tsum == 0) {
             return 0.0f;
         }
-        return DW1000_TIME_TO_METERS * (((float)((tround1*tround2) - (treply1*treply2))) / ((float)tsum));
+        return ((tround1*tround2) - (treply1*treply2)) / tsum;
     } else {
         return 0.0f;
     }
 }
 
-static void calc_for_transmit(uint8_t trip_id, int64_t *tround1, int64_t *treply2, int64_t transmit_tstamp, uint8_t module_num)
+static void calc_for_transmit(uint8_t _trip_id, int64_t *tround1, int64_t *treply2, int64_t transmit_tstamp, uint8_t module_num)
 {
-    switch(trip_id) {
+    switch(_trip_id) {
         case 0:
             tx_tstamp_list[module_num][0] = transmit_tstamp;
             *tround1 = rx_tstamp_list[module_num][1] - tx_tstamp_list[module_num][1];
@@ -97,6 +103,12 @@ static void calc_for_transmit(uint8_t trip_id, int64_t *tround1, int64_t *treply
     }
     *tround1 = dw1000_wrap_timestamp(*tround1);
     *treply2 = dw1000_wrap_timestamp(*treply2);
+    if (twr_status[module_num] == TWR_LOCKED) {
+        if (tround1 > (int64_t)(2*MAX_NUM_DEVICES*SLOT_SIZE*UWB_SYS_TICKS) || treply2 > (int64_t)(2*MAX_NUM_DEVICES*SLOT_SIZE*UWB_SYS_TICKS)) {
+            twr_status[module_num] = TWR_RESET;
+            trip_id[module_num] = 0;
+        }
+    }
 }
 
 //update twr methods
@@ -152,10 +164,8 @@ void update_twr_tx(struct message_spec_s *msg, int64_t transmit_tstamp)
 
 bool push_calib_data(float range, uint8_t id1, uint8_t id2)
 {
+    static float last_range = 0.0f;
     if (sample_count[id1][id2] != MAX_CAL_SAMPLES) {
-        if(sample_count[id1][id2] > 0 && fabsf(range - calib_data[id1][id2]) > 10.0f) {
-            return false;
-        }
         calib_data[id1][id2] = calib_data[id1][id2]*sample_count[id1][id2] + range;
         sample_count[id1][id2]++;
         calib_data[id1][id2] /= sample_count[id1][id2];
@@ -178,8 +188,16 @@ bool push_calib_data(float range, uint8_t id1, uint8_t id2)
     return true;
 }
 
-//Returns Aggregate Antenna Delay for given device id
-float get_result(uint8_t id)
+//Returns Aggregate Antenna Delay for given device id set
+
+static float get_true_range(uint8_t id1, uint8_t id2)
+{
+    return sqrtf(SQR(body_pos[id1][0] - body_pos[id2][0]) +
+                 SQR(body_pos[id1][1] - body_pos[id2][1]) +
+                 SQR(body_pos[id1][2] - body_pos[id2][2]));
+}
+
+static float do_single_cal(uint8_t id0, uint8_t id1, uint8_t id2)
 {
     float delta[3][3];
     float result;
@@ -188,24 +206,59 @@ float get_result(uint8_t id)
             if (i == j) {
                 continue;
             }
-            delta[i][j] = calib_data[i][j] - TRUE_RANGE;
+            delta[i][j] = calib_data[i][j] - get_true_range(i, j);
         }
     }
-    result = (delta[id][(id+1)%3] + delta[(id+1)%3][id])/2;
-    result += (delta[id][(id+2)%3] + delta[(id+2)%3][id])/2;
-    result -= (delta[(id+1)%3][(id+2)%3] + delta[(id+2)%3][(id+1)%3])/2;
+    result = (delta[id0][id1] + delta[id1][id0])/2;
+    result += (delta[id0][id2] + delta[id2][id0])/2;
+    result -= (delta[id1][id2] + delta[id2][id1])/2;
     return result;
 }
 
-uint16_t get_sample_count(uint8_t id1, uint8_t id2)
+
+static float do_cal(uint8_t num_devices, uint8_t node_id)
+{
+    uint8_t num_runs = 0;
+    for (uint8_t i = 1; i < num_devices; i++) {
+        for (uint8_t j = i+1; j < num_devices; j++) {
+            ant_delay += do_single_cal(node_id, (node_id+i)%num_devices, (node_id+j)%num_devices);
+            num_runs++;
+        }
+    }
+    ant_delay /= num_runs;
+    ant_delay /= DW1000_TIME_TO_METERS;
+    ant_delay /= 2.0f;
+}
+
+static uint16_t get_sample_count(uint8_t id1, uint8_t id2)
 {
     return sample_count[id1][id2];
 }
 
 
-float get_sample_dat(uint8_t id1, uint8_t id2)
+static int64_t get_sample_dat(uint8_t id1, uint8_t id2)
 {
     return calib_data[id1][id2];
+}
+
+float get_ant_delay()
+{
+    return ant_delay;
+}
+
+bool is_data_collection_complete(uint8_t num_devices)
+{
+    if (num_devices < 3) {
+        return false;
+    }
+    for (uint8_t i = 0; i < num_devices; i++) {
+        for (uint8_t j = 0; j < num_devices; j++) {
+            if ((i != j) && (get_sample_count(i, j) < 1000)) {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 void update_twr_cal_tx(struct message_spec_s *msg, int64_t transmit_tstamp)
@@ -213,7 +266,7 @@ void update_twr_cal_tx(struct message_spec_s *msg, int64_t transmit_tstamp)
     update_twr_tx(msg, transmit_tstamp);
 }
 
-void update_twr_cal_rx(struct message_spec_s *msg, struct tx_spec_s *tx_spec, int64_t receive_tstamp)
+bool update_twr_cal_rx(struct message_spec_s *msg, struct tx_spec_s *tx_spec, int64_t receive_tstamp)
 {
     for (uint8_t i = 0; i < MAX_NUM_DEVICES; i++) {
         if (msg->ds_twr_data[i].twr_status == TWR_LOCKED) {
@@ -221,9 +274,37 @@ void update_twr_cal_rx(struct message_spec_s *msg, struct tx_spec_s *tx_spec, in
         }
     }
     update_twr_rx(msg, tx_spec, receive_tstamp);
+    body_pos[msg->tx_spec.data_slot_id][0] = msg->tx_spec.body_pos[0];
+    body_pos[msg->tx_spec.data_slot_id][1] = msg->tx_spec.body_pos[1];
+    body_pos[msg->tx_spec.data_slot_id][2] = msg->tx_spec.body_pos[2];
+
+    body_pos[tx_spec->data_slot_id][0] = tx_spec->body_pos[0];
+    body_pos[tx_spec->data_slot_id][1] = tx_spec->body_pos[1];
+    body_pos[tx_spec->data_slot_id][2] = tx_spec->body_pos[2];
+
     if (twr_status[msg->tx_spec.data_slot_id] == TWR_LOCKED) {
         //push our own range as well
         push_calib_data(range[msg->tx_spec.data_slot_id], tx_spec->data_slot_id, msg->tx_spec.data_slot_id);
+    }
+    if (is_data_collection_complete(msg->tdma_spec.num_slots)) {
+        do_cal(msg->tdma_spec.num_slots, tx_spec->node_id);
+        tx_spec->ant_delay_cal_status = ANT_DELAY_CAL_COMPLETED;
+        tx_spec->ant_delay = (uint32_t)ant_delay;
+        return true;
+    }
+    return false;
+}
+
+void print_cal_status(struct tdma_spec_s *tdma_spec, struct tx_spec_s *tx_spec)
+{
+    uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "\n\nCAL", "\n\nNID: %x NUM_SLOTS: %d CS: %d ANT_DELAY: %f", 
+        tx_spec->node_id, tdma_spec->num_slots, tx_spec->ant_delay_cal_status, ant_delay);
+    for (uint8_t i = 0; i < tdma_spec->num_slots; i++) {
+        for (uint8_t j = 0; j < tdma_spec->num_slots; j++) {
+            if (i != j) {
+                uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "CAL", "SID: %d %d DCOUNT: %d ", i, j, get_sample_count(i,j));// (int32_t)get_sample_dat(i,j));
+            }
+        }
     }
 }
 

@@ -88,8 +88,7 @@ void tdma_subordinate_init(struct tx_spec_s _tx_spec, struct worker_thread_s* wo
                                                                DW1000_IRQ_MASK(DW1000_SYS_STATUS_RXOVRR) |
                                                                DW1000_IRQ_MASK(DW1000_SYS_STATUS_TXFRS));
 
-    pubsub_init_and_register_listener(uwb_instance.irq_topic, &uwb_instance.irq_listener, dw1000_sys_status_handler, NULL);
-    worker_thread_add_listener_task(listener_thread, &uwb_instance.irq_listener_task, &uwb_instance.irq_listener);
+    worker_thread_add_listener_task(listener_thread, &uwb_instance.irq_listener_task, uwb_instance.irq_topic, dw1000_sys_status_handler, NULL);
     worker_thread_add_timer_task(worker_thread, &status_task, status_checker, NULL, MS2ST(2), true);
     worker_thread_add_timer_task(worker_thread, &main_task, transmit_loop, NULL, US2ST(SLOT_SIZE/4), true);
 
@@ -166,7 +165,7 @@ static void handle_receive_event(void)
         }
         //Also setup ranging request of our own
         if (data_slot_allocated) {
-            if (tx_spec.ant_delay_cal && msg.tx_spec.ant_delay_cal && (msg.tx_spec.body_id == tx_spec.body_id)) {
+            if (tx_spec.ant_delay_cal_status && msg.tx_spec.ant_delay_cal_status && (msg.tx_spec.body_id == tx_spec.body_id)) {
                 update_twr_cal_rx(&msg, &tx_spec, rx_info.timestamp);
             } else if(msg.tdma_spec.target_body_id == tx_spec.body_id) {
                 //we are receiving TWR request
@@ -191,11 +190,8 @@ static void transmit_loop(struct worker_thread_timer_task_s* task)
             //pack message
             msg.tdma_spec = tdma_spec;
             msg.tx_spec = tx_spec;
-            if (tx_spec.ant_delay_cal) {
-                update_twr_cal_tx(&msg, scheduled_time + tx_spec.ant_delay);
-            } else {
-                update_twr_tx(&msg, scheduled_time + tx_spec.ant_delay);
-            }
+            
+            update_twr_tx(&msg, scheduled_time + tx_spec.ant_delay);
             //send ranging pkt
             if (dw1000_scheduled_transmit(&uwb_instance, scheduled_time, 
                            MSG_HEADER_SIZE + MSG_PAYLOAD_SIZE(5), &msg, true)) {

@@ -17,7 +17,7 @@
 #define MAX_HEADER_SIZE 93
 #define TX_RATE 6800000
 
-#define SLOT_SIZE 4000ULL    //8ms
+#define SLOT_SIZE 5000ULL    //1ms
 #define TOTAL_AVAILABLE_SLOTS 10
 #define MAX_NUM_DEVICES TOTAL_AVAILABLE_SLOTS
 #define INITIAL_BACKOFF_MASK 0x1
@@ -66,6 +66,12 @@ enum tdma_types {
     TDMA_SNIFFER
 };
 
+enum {
+    ANT_DELAY_CAL_STOPPED = 0,
+    ANT_DELAY_CAL_RUNNING,
+    ANT_DELAY_CAL_COMPLETED
+};
+
 struct __attribute__((packed)) tdma_spec_s {
     uint8_t num_slots;
     uint8_t target_body_id;
@@ -80,10 +86,12 @@ struct __attribute__((packed)) tx_spec_s {
     uint8_t node_id;
     uint8_t body_id;
     uint8_t data_slot_id;
-    uint8_t ant_delay_cal;
+    uint8_t ant_delay_cal_status;
     uint32_t ant_delay;
     uint32_t pkt_cnt;
+    float body_pos[3];
 };
+
 
 #define MSG_HEADER_SIZE (sizeof(struct tdma_spec_s)+sizeof(struct tx_spec_s))
 #define MSG_PAYLOAD_SIZE(x) (x*sizeof(struct ds_twr_data_s))

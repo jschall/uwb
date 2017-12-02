@@ -37,6 +37,8 @@
 #define MAX_CAL_SAMPLES 1000
 struct message_spec_s;
 struct tx_spec_s;
+struct tdma_spec_s;
+
 
 enum twr_statuses {
     TWR_RESET = 0,
@@ -49,7 +51,7 @@ struct __attribute__((packed)) ds_twr_data_s {
     uint8_t twr_status;
     int64_t treply2;
     int64_t tround1;
-    float tprop;    //this will be in meters
+    int64_t tprop;
 };
 
 struct range_sol_s {
@@ -64,10 +66,9 @@ void update_twr_tx(struct message_spec_s *msg, int64_t transmit_tstamp);
 void update_twr_rx(struct message_spec_s *msg, struct tx_spec_s *tx_spec, int64_t receive_tstamp);
 
 //Calibration methods
+void print_cal_status(struct tdma_spec_s *tdma_spec, struct tx_spec_s *tx_spec);
 void update_twr_cal_tx(struct message_spec_s *msg, int64_t transmit_tstamp);
-void update_twr_cal_rx(struct message_spec_s *msg, struct tx_spec_s *tx_spec, int64_t receive_tstamp);
-float get_result(uint8_t id);
-float get_sample_dat(uint8_t id1, uint8_t id2);
-uint16_t get_sample_count(uint8_t id1, uint8_t id2);
+bool update_twr_cal_rx(struct message_spec_s *msg, struct tx_spec_s *tx_spec, int64_t receive_tstamp);
+float get_ant_delay();
 
 #include "tdma.h"

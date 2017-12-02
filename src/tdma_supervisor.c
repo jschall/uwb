@@ -12,6 +12,7 @@ static struct message_spec_s msg;
 
 //Debug States
 static uint16_t num_successful_recieves;
+static uint16_t num_subordinate_receives;
 static uint16_t num_successful_transmits;
 static uint16_t num_rts_received;
 static uint16_t num_cts_received;
@@ -80,7 +81,7 @@ static void status_checker(struct worker_thread_timer_task_s* task)
 {
     (void)task;
     //If we haven't received anything for more than RX_TIMEOUT we go in manually to check if we are in an error state
-    if ((millis() - last_receive) > RX_TIMEOUT) {
+    /*if ((millis() - last_receive) > RX_TIMEOUT) {
         if (dw1000_get_status(&uwb_instance) & DW1000_IRQ_MASK(DW1000_SYS_STATUS_RXOVRR)) {
             dw1000_disable_transceiver(&uwb_instance);
             dw1000_swap_rx_buffers(&uwb_instance);
@@ -89,7 +90,7 @@ static void status_checker(struct worker_thread_timer_task_s* task)
             dw1000_rx_enable(&uwb_instance);
         }
         last_receive = millis();
-    }
+    }*/
     if ((millis() - last_transmit) > TX_TIMEOUT) {
         transmit_complete = true;
     }
@@ -102,7 +103,7 @@ static void status_checker(struct worker_thread_timer_task_s* task)
     }
     if (new_range) {
         if(range < 100.0f) {
-            uavcan_send_debug_keyvalue("Range", range);
+            //uavcan_send_debug_keyvalue("Range", range);
         }
         new_range = false;
     }
@@ -144,9 +145,9 @@ void tdma_supervisor_init(struct tx_spec_s _tx_spec, uint8_t target_body_id, str
     last_transmit = 0;
     num_cts_sent = 0;
     num_rts_sent = 0;
+    num_subordinate_receives = 0;
 
     memcpy(&tx_spec, &_tx_spec, sizeof(tx_spec));
-    tx_spec.body_id = _tx_spec.node_id;
 
     //seed random number generator
     srand(((uint32_t)tx_spec.node_id) | ((uint32_t)tx_spec.body_id<<16));
@@ -162,8 +163,8 @@ void tdma_supervisor_init(struct tx_spec_s _tx_spec, uint8_t target_body_id, str
                                                                DW1000_IRQ_MASK(DW1000_SYS_STATUS_TXFRS));
     //register irq listener task
 
-    pubsub_init_and_register_listener(uwb_instance.irq_topic, &uwb_instance.irq_listener, dw1000_sys_status_handler, NULL);
-    worker_thread_add_listener_task(listener_thread, &uwb_instance.irq_listener_task, &uwb_instance.irq_listener);
+    worker_thread_add_listener_task(listener_thread, &uwb_instance.irq_listener_task, uwb_instance.irq_topic, dw1000_sys_status_handler, NULL);
+
     worker_thread_add_timer_task(worker_thread, &status_task, status_checker, NULL, MS2ST(2), true);
     worker_thread_add_timer_task(worker_thread, &main_task, transmit_loop, NULL, US2ST(SLOT_SIZE/4), true);
 
@@ -194,7 +195,7 @@ static void super_update_start_slot(void)
 
     uint64_t scheduled_time = (dw1000_get_sys_time(&uwb_instance)+ARB_TIME_SYS_TICKS)&0xFFFFFFFFFFFFFE00ULL;
 
-    if (tx_spec.ant_delay_cal) {
+    if (tx_spec.ant_delay_cal_status) {
         update_twr_cal_tx(&msg, scheduled_time + tx_spec.ant_delay);
     } else {
         update_twr_tx(&msg, scheduled_time + tx_spec.ant_delay);
@@ -370,7 +371,9 @@ static void handle_receive_event(void)
                 //handle intra module slot request
                 handle_request_slot();
             }
+            num_subordinate_receives++;
             //TODO: calibration routine
+            update_twr_cal_rx(&msg, &tx_spec, rx_info.timestamp);
         } else if (msg.tdma_spec.target_body_id == tx_spec.body_id) {
             //We are receiving data from a body
             schedule_dack = true;
@@ -406,15 +409,17 @@ static void transmit_loop(struct worker_thread_timer_task_s* task)
     }
     last_us = micros();
     if ((millis() - last_perf_print) > 5000) {
-        uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "\nSuper PERF",
-            "\nPERIOD: %lu/%lu RXOVRR: %d", (uint32_t)(avg_period/perf_cnt), (uint32_t)max_period, num_rx_ovrr);
-        uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Super PERF",
+        /*uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "\nSuper PERF",
+            "\nPERIOD: %lu/%lu RXOVRR: %d", (uint32_t)(avg_period/perf_cnt), (uint32_t)max_period, num_rx_ovrr);*/
+        /*uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Super PERF",
             "NID:%x TX: %d RX: %d Rate: %d RTS: %d CTS: %d/%d DS: %d/%d DACK: %d", 
             tx_spec.node_id,
             num_successful_transmits, num_successful_recieves,
             (num_successful_recieves - last_successful_recieves)/5,
             num_rts_received, num_rts_sent, num_cts_received, num_cts_sent, num_ds_received, num_dack_received);
-
+        */
+        /*uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Super PERF","NSR: %d", num_subordinate_receives);*/
+        print_cal_status(&tdma_spec, &tx_spec);
         last_successful_recieves = num_successful_recieves;
         last_perf_print = millis();
         perf_cnt = 0;
@@ -490,9 +495,9 @@ static void transmit_loop(struct worker_thread_timer_task_s* task)
                 break;
         }
     }
-    if (started_acquiring_medium && !tx_spec.ant_delay_cal) {
+    if (started_acquiring_medium && !tx_spec.ant_delay_cal_status) {
         try_acquiring_medium();
-    } else if(tx_spec.ant_delay_cal) {
+    } else if(tx_spec.ant_delay_cal_status) {
         transmit_state = SEND_NONE;
         initiate_cal_run();
     }

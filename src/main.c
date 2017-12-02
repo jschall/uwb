@@ -55,17 +55,21 @@ RUN_ON(WORKER_THREADS_START) {
 }
 
 
-int main(void) {
+RUN_BEFORE(INIT_END) {
     uint8_t unique_id[12];
     board_get_unique_id(unique_id, sizeof(unique_id));
     struct tx_spec_s tx_spec_init;
     tx_spec_init.type = param_tdma_unit_type;
     tx_spec_init.node_id = unique_id[10];
     tx_spec_init.body_id = param_tdma_body_id;
-    tx_spec_init.ant_delay_cal = param_ant_delay_cal;
+    tx_spec_init.ant_delay_cal_status = param_ant_delay_cal;
     tx_spec_init.ant_delay = param_ant_delay;
     tx_spec_init.pkt_cnt = 0;
     tx_spec_init.data_slot_id = 255;
+    tx_spec_init.body_pos[0] = param_anchor_pos_x;
+    tx_spec_init.body_pos[1] = param_anchor_pos_y;
+    tx_spec_init.body_pos[2] = param_anchor_pos_z;
+    
 
     if (param_tdma_tx_type == TDMA_SUPERVISOR) { // we are tdma supervisor
         tdma_supervisor_init(tx_spec_init, param_tdma_tbody_id, &lpwork_thread, &uwb_listener_thread);
@@ -74,9 +78,11 @@ int main(void) {
     } else {
         tdma_sniffer_run();
     }
-    while(true) {
-        chThdSleepMilliseconds(10000);
-    }
-    return 0;
+}
 
+int main() {
+    chSysLock();
+    chThdSleepS(TIME_INFINITE);
+    chSysUnlock();
+    return 0;
 }
