@@ -420,24 +420,28 @@ static void transmit_loop(struct worker_thread_timer_task_s* task)
     static uint64_t last_us, avg_period = 0, max_period = 999999, curr_period;
     perf_cnt++;
     //Transmit Loop Perf Measurement
-    curr_period = cal_period;
+    curr_period = micros() - last_us;;
     avg_period += curr_period;
     if (curr_period < max_period) {
         max_period = curr_period;
     }
     last_us = micros();
     if ((millis() - last_perf_print) > 5000) {
+
         uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "\nSuper PERF",
             "\nPERIOD: %lu/%lu RXOVRR: %d", (uint32_t)(avg_period/perf_cnt), (uint32_t)max_period, num_rx_ovrr);
-        uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Super PERF",
-            "NID:%x TX: %d RX: %d/%d Rate: %d Range: %ld/%ld", //RTS: %d CTS: %d/%d DS: %d/%d DACK: %d", 
-            tx_spec.node_id,
-            num_successful_transmits, n1, n2,
-            (num_successful_recieves - last_successful_recieves)/5,get_range(0), get_range(1));
-            //num_rts_received, num_rts_sent, num_cts_received, num_cts_sent, num_ds_received, num_dack_received);
-        
-        /*uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Super PERF","NSR: %d", num_subordinate_receives);*/
-        //print_cal_status(&tdma_spec, &tx_spec);
+        if (tx_spec.ant_delay_cal_status > 0) {
+                print_cal_status(&tdma_spec, &tx_spec);
+        } else {
+            uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Super PERF",
+                "NID:%x TX: %d RX: %d/%d Rate: %d Range: %ld/%ld", //RTS: %d CTS: %d/%d DS: %d/%d DACK: %d", 
+                tx_spec.node_id,
+                num_successful_transmits, n1, n2,
+                (num_successful_recieves - last_successful_recieves)/5,get_range(0), get_range(1));
+                //num_rts_received, num_rts_sent, num_cts_received, num_cts_sent, num_ds_received, num_dack_received);
+            
+            /*uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Super PERF","NSR: %d", num_subordinate_receives);*/
+        }
         last_successful_recieves = num_successful_recieves;
         last_perf_print = millis();
         perf_cnt = 0;

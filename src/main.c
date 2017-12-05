@@ -54,7 +54,7 @@ struct worker_thread_s uwb_listener_thread;
 WORKER_THREAD_TAKEOVER_MAIN(lpwork_thread, LOWPRIO)
 WORKER_THREAD_SPAWN(can_thread, LOWPRIO, 700)
 WORKER_THREAD_SPAWN(uwb_listener_thread, LOWPRIO, 700)
-/*
+
 static struct worker_thread_timer_task_s stack_print_task;
 
 static size_t get_thd_free_stack(void *wsp, size_t size)
@@ -74,10 +74,18 @@ static void stack_print(struct worker_thread_timer_task_s* task)
     static volatile uint16_t n = 0;
     n = get_thd_free_stack(can_thread.thread->wabase, 1152);
     uint16_t z = 1152;
+    uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "\nSTACK","can_thread free stack memory : %u%% of %u bytes",    \
+                   (n)*100/((z) - sizeof(thread_t)), ((z) - sizeof(thread_t)));
+    n = get_thd_free_stack(lpwork_thread.thread->wabase, 1152);
+    z = 1152;
+    uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "\nSTACK","lpwork_thread free stack memory : %u%% of %u bytes",    \
+                   (n)*100/((z) - sizeof(thread_t)), ((z) - sizeof(thread_t)));
+    n = get_thd_free_stack(uwb_listener_thread.thread->wabase, 1152);
+    z = 1152;
     uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "\nSTACK","LPWork free stack memory : %u%% of %u bytes",    \
                    (n)*100/((z) - sizeof(thread_t)), ((z) - sizeof(thread_t)));
 }
-*/
+
 RUN_BEFORE(INIT_END) {
     uint8_t unique_id[12];
     board_get_unique_id(unique_id, sizeof(unique_id));

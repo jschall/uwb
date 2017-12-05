@@ -30,19 +30,19 @@ static void print_info(struct message_spec_s *_msg, struct dw1000_rx_frame_info_
         switch (pkt->magic) {
             case RTS_MAGIC:
                 uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "RTS_MAGIC",
-                    "T:%.0f BID: %x TID: %x", rx_info.timestamp/UWB_SYS_TICKS, pkt->body_id, pkt->target_body_id);
+                    "T:%ld BID: %x TID: %x", (uint32_t)(rx_info.timestamp/UWB_SYS_TICKS), pkt->body_id, pkt->target_body_id);
                 break;
             case CTS_MAGIC:
                 uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "CTS_MAGIC",
-                    "T:%.0f BID: %x TID: %x", rx_info.timestamp/UWB_SYS_TICKS, pkt->body_id, pkt->target_body_id);
+                    "T:%ld BID: %x TID: %x", (uint32_t)(rx_info.timestamp/UWB_SYS_TICKS), pkt->body_id, pkt->target_body_id);
                 break;
             case DS_MAGIC:
                 uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "DS_MAGIC",
-                    "T:%.0f BID: %x TID: %x", rx_info.timestamp/UWB_SYS_TICKS, pkt->body_id, pkt->target_body_id);
+                    "T:%ld BID: %x TID: %x", (uint32_t)(rx_info.timestamp/UWB_SYS_TICKS), pkt->body_id, pkt->target_body_id);
                 break;
             case DACK_MAGIC:
                 uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "DACK_MAGIC",
-                    "T:%.0f BID: %x TID: %x", rx_info.timestamp/UWB_SYS_TICKS, pkt->body_id, pkt->target_body_id);
+                    "T:%ld BID: %x TID: %x", (uint32_t)(rx_info.timestamp/UWB_SYS_TICKS), pkt->body_id, pkt->target_body_id);
                 break;
         };
     }else {    //print_tdma_spec();

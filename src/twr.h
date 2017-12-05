@@ -68,8 +68,9 @@ void update_twr_rx(struct message_spec_s *msg, struct tx_spec_s *tx_spec, int64_
 //Calibration methods
 void print_cal_status(struct tdma_spec_s *tdma_spec, struct tx_spec_s *tx_spec);
 void update_twr_cal_tx(struct message_spec_s *msg, int64_t transmit_tstamp);
-bool update_twr_cal_rx(struct message_spec_s *msg, struct tx_spec_s *tx_spec, int64_t receive_tstamp);
-float get_ant_delay(void);
+void update_twr_cal_rx(struct message_spec_s *msg, struct tx_spec_s *tx_spec, int64_t receive_tstamp);
+uint32_t get_ant_delay(void);
 int32_t get_range(uint8_t id);
+void do_cal(uint8_t num_devices, uint8_t slot_id);
 
 #include "tdma.h"

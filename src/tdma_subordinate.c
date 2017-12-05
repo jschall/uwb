@@ -197,8 +197,11 @@ static void transmit_loop(struct worker_thread_timer_task_s* task)
     if ((!transmit_scheduled) && data_slot_allocated) {
 
         if ((millis() - last_perf_print) > 5000) {
-            uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "\nSub PERF",
-            "NID:%x Alloc:%d RX: %d/%d", tx_spec.node_id, data_slot_allocated, n1, n2);
+            //uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "\nSub PERF",
+            //"NID:%x Alloc:%d RX: %d/%d", tx_spec.node_id, data_slot_allocated, n1, n2);
+            if (tx_spec.ant_delay_cal_status > 0) {
+                print_cal_status(&tdma_spec, &tx_spec);
+            }
             last_perf_print = millis();
         }
         //we will schedule our transmit right before
