@@ -51,11 +51,33 @@ PARAM_DEFINE_FLOAT32_PARAM_STATIC(param_anchor_pos_z, "ANCHOR_POS_Z", 0.0f, -500
 
 struct worker_thread_s uwb_listener_thread;
 
-RUN_ON(WORKER_THREADS_START) {
-    worker_thread_init(&uwb_listener_thread,"uwb_Listener", 1024, LOWPRIO);      //All timer repeatitive task go in here
+WORKER_THREAD_TAKEOVER_MAIN(lpwork_thread, LOWPRIO)
+WORKER_THREAD_SPAWN(can_thread, LOWPRIO, 700)
+WORKER_THREAD_SPAWN(uwb_listener_thread, LOWPRIO, 700)
+/*
+static struct worker_thread_timer_task_s stack_print_task;
+
+static size_t get_thd_free_stack(void *wsp, size_t size)
+{
+  size_t n = 0;
+#if CH_DBG_FILL_THREADS
+  uint8_t *startp = (uint8_t *)wsp + sizeof(thread_t);
+  uint8_t *endp = (uint8_t *)wsp + size;
+  while (startp < endp)
+    if(*startp++ == CH_DBG_STACK_FILL_VALUE) ++n;
+#endif
+  return n;
 }
 
-
+static void stack_print(struct worker_thread_timer_task_s* task)
+{
+    static volatile uint16_t n = 0;
+    n = get_thd_free_stack(can_thread.thread->wabase, 1152);
+    uint16_t z = 1152;
+    uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "\nSTACK","LPWork free stack memory : %u%% of %u bytes",    \
+                   (n)*100/((z) - sizeof(thread_t)), ((z) - sizeof(thread_t)));
+}
+*/
 RUN_BEFORE(INIT_END) {
     uint8_t unique_id[12];
     board_get_unique_id(unique_id, sizeof(unique_id));
@@ -70,7 +92,7 @@ RUN_BEFORE(INIT_END) {
     tx_spec_init.body_pos[0] = param_anchor_pos_x;
     tx_spec_init.body_pos[1] = param_anchor_pos_y;
     tx_spec_init.body_pos[2] = param_anchor_pos_z;
-    
+    //worker_thread_add_timer_task(&lpwork_thread, &stack_print_task, stack_print, NULL, MS2ST(1000), true);
 
     if (param_tdma_tx_type == TDMA_SUPERVISOR) { // we are tdma supervisor
         tdma_supervisor_init(tx_spec_init, param_tdma_tbody_id, &lpwork_thread, &uwb_listener_thread);
@@ -81,9 +103,3 @@ RUN_BEFORE(INIT_END) {
     }
 }
 
-int main() {
-    chSysLock();
-    chThdSleepS(TIME_INFINITE);
-    chSysUnlock();
-    return 0;
-}
