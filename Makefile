@@ -7,7 +7,7 @@ MODULES_ENABLED = chibios_sys_init chibios_hal_init can can_autobaud can_driver_
 
 MESSAGES_ENABLED = uavcan.protocol.debug.LogMessage uavcan.protocol.GetNodeInfo
 
--include omd_common/include.mk
+-include framework/include.mk
 
-omd_common/include.mk: PRE_BUILD_RULE
+framework/include.mk: PRE_BUILD_RULE
 	git submodule init && git submodule update
