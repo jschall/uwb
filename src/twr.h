@@ -69,6 +69,7 @@ void update_twr_rx(struct message_spec_s *msg, struct tx_spec_s *tx_spec, int64_
 void print_cal_status(struct tdma_spec_s *tdma_spec, struct tx_spec_s *tx_spec);
 void update_twr_cal_tx(struct message_spec_s *msg, int64_t transmit_tstamp);
 bool update_twr_cal_rx(struct message_spec_s *msg, struct tx_spec_s *tx_spec, int64_t receive_tstamp);
-float get_ant_delay();
+float get_ant_delay(void);
+int32_t get_range(uint8_t id);
 
 #include "tdma.h"

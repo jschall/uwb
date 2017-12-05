@@ -10,7 +10,7 @@ static uint16_t sample_count[5][5];
 //Contains list of data_sets for ranging
 static int64_t rx_tstamp_list[MAX_NUM_DEVICES][2];
 static int64_t tx_tstamp_list[MAX_NUM_DEVICES][2];
-static float range[MAX_NUM_DEVICES];
+static int32_t range[MAX_NUM_DEVICES];
 static float body_pos[MAX_NUM_DEVICES][3];
 static float ant_delay;
 /*
@@ -61,7 +61,7 @@ static int64_t do_ds_twr(uint8_t _trip_id, int64_t tround1, int64_t treply2, int
     tround2 = dw1000_wrap_timestamp(tround2);
     treply1 = dw1000_wrap_timestamp(treply1);
     if (twr_status[module_num] == TWR_LOCKED) {
-        if (tround2 > (int64_t)(2*MAX_NUM_DEVICES*SLOT_SIZE*UWB_SYS_TICKS) || treply1 > (int64_t)(2*MAX_NUM_DEVICES*SLOT_SIZE*UWB_SYS_TICKS)) {
+        if (tround2 > (int64_t)(4*MAX_NUM_DEVICES*SLOT_SIZE*UWB_SYS_TICKS) || treply1 > (int64_t)(4*MAX_NUM_DEVICES*SLOT_SIZE*UWB_SYS_TICKS)) {
             twr_status[module_num] = TWR_RESET;
             trip_id[module_num] = 0;
         }
@@ -69,7 +69,11 @@ static int64_t do_ds_twr(uint8_t _trip_id, int64_t tround1, int64_t treply2, int
         if(tsum == 0) {
             return 0.0f;
         }
-        return ((tround1*tround2) - (treply1*treply2)) / tsum;
+        int64_t res = ((tround1*tround2) - (treply1*treply2)) / tsum;
+        if (res < 0) {
+            uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "CAL", "%ld %ld %ld %ld %ld", (int32_t)res, (int32_t)tround1, (int32_t)tround2, (int32_t)treply1, (int32_t)treply2);
+        }
+        return res;
     } else {
         return 0.0f;
     }
@@ -104,10 +108,10 @@ static void calc_for_transmit(uint8_t _trip_id, int64_t *tround1, int64_t *trepl
     *tround1 = dw1000_wrap_timestamp(*tround1);
     *treply2 = dw1000_wrap_timestamp(*treply2);
     if (twr_status[module_num] == TWR_LOCKED) {
-        if (tround1 > (int64_t)(2*MAX_NUM_DEVICES*SLOT_SIZE*UWB_SYS_TICKS) || treply2 > (int64_t)(2*MAX_NUM_DEVICES*SLOT_SIZE*UWB_SYS_TICKS)) {
+        /*if (tround1 > (int64_t)(10*MAX_NUM_DEVICES*SLOT_SIZE*UWB_SYS_TICKS) || treply2 > (int64_t)(10*MAX_NUM_DEVICES*SLOT_SIZE*UWB_SYS_TICKS)) {
             twr_status[module_num] = TWR_RESET;
             trip_id[module_num] = 0;
-        }
+        }*/
     }
 }
 
@@ -120,12 +124,15 @@ void update_twr_rx(struct message_spec_s *msg, struct tx_spec_s *tx_spec, int64_
             trip_id[msg->tx_spec.data_slot_id] = 0;
             return;
         case TWR_INIT:
-            if (twr_status[msg->tx_spec.data_slot_id] == TWR_RESET && 
-                trip_id[msg->tx_spec.data_slot_id] == 0) {
+            if (twr_status[msg->tx_spec.data_slot_id] == TWR_RESET) {
                 twr_status[msg->tx_spec.data_slot_id] = TWR_INIT;
             }
             break;
         case TWR_LOCKED:
+            if (twr_status[msg->tx_spec.data_slot_id] == TWR_RESET) {
+                //we have commanded reset do nothing until init
+                return;
+            }
             if (twr_status[msg->tx_spec.data_slot_id] == TWR_INIT) {
                 twr_status[msg->tx_spec.data_slot_id] = TWR_LOCKED;
             }
@@ -164,7 +171,6 @@ void update_twr_tx(struct message_spec_s *msg, int64_t transmit_tstamp)
 
 bool push_calib_data(float range, uint8_t id1, uint8_t id2)
 {
-    static float last_range = 0.0f;
     if (sample_count[id1][id2] != MAX_CAL_SAMPLES) {
         calib_data[id1][id2] = calib_data[id1][id2]*sample_count[id1][id2] + range;
         sample_count[id1][id2]++;
@@ -216,7 +222,7 @@ static float do_single_cal(uint8_t id0, uint8_t id1, uint8_t id2)
 }
 
 
-static float do_cal(uint8_t num_devices, uint8_t node_id)
+static void do_cal(uint8_t num_devices, uint8_t node_id)
 {
     uint8_t num_runs = 0;
     for (uint8_t i = 1; i < num_devices; i++) {
@@ -308,3 +314,7 @@ void print_cal_status(struct tdma_spec_s *tdma_spec, struct tx_spec_s *tx_spec)
     }
 }
 
+int32_t get_range(uint8_t id)
+{
+    return range[id];
+}

@@ -48,8 +48,8 @@ static void print_info(struct message_spec_s *_msg, struct dw1000_rx_frame_info_
     }else {    //print_tdma_spec();
         for (uint8_t i = 0; i < _msg->tdma_spec.num_slots; i++) {
             uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "TWR", 
-                "NID: %x NUM_SLOTS: %d Range: %ld",
-                _msg->tx_spec.node_id, _msg->tdma_spec.num_slots, (uint32_t)_msg->ds_twr_data[i].tprop);
+                "NID: %x NUM_SLOTS: %d STATUS: %d Range: %ld TID: %d",
+                _msg->tx_spec.node_id, _msg->tdma_spec.num_slots, _msg->ds_twr_data[i].twr_status, (uint32_t)_msg->ds_twr_data[i].tprop, _msg->ds_twr_data[i].trip_id);
         }
     }
 }

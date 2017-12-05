@@ -25,7 +25,8 @@
 #include <modules/param/param.h>
 #include <modules/uavcan/uavcan.h>
 #include "tdma.h"
-#include <modules/lpwork_thread/lpwork_thread.h>
+#include <modules/worker_thread/worker_thread.h>
+
 
 /*
 PARAM_DEFINE_FLOAT32_PARAM_STATIC(param_a, "a", 4, 3, 5)

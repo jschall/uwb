@@ -12,6 +12,9 @@ static struct message_spec_s msg;
 
 //Debug States
 static uint16_t num_successful_recieves;
+static uint16_t n1;
+static uint16_t n2;
+
 static uint16_t num_subordinate_receives;
 static uint16_t num_successful_transmits;
 static uint16_t num_rts_received;
@@ -46,6 +49,10 @@ static uint8_t rts_backoff_mask;
 static uint32_t defer_acquire_medium_tstart;
 static bool schedule_dack;
 static bool receive_acquiring_medium;
+
+
+static struct worker_thread_s *lpworker_thread;
+static struct worker_thread_s *listener_thread;
 
 static void handle_receive_event(void);
 static void transmit_loop(struct worker_thread_timer_task_s* task);
@@ -115,7 +122,7 @@ static void status_checker(struct worker_thread_timer_task_s* task)
 /*
     TDMA Init
 */
-void tdma_supervisor_init(struct tx_spec_s _tx_spec, uint8_t target_body_id, struct worker_thread_s* worker_thread, struct worker_thread_s* listener_thread)
+void tdma_supervisor_init(struct tx_spec_s _tx_spec, uint8_t target_body_id, struct worker_thread_s* _lpworker_thread, struct worker_thread_s* _listener_thread)
 {
     //TDMA Init
     tdma_spec.slot_size = SLOT_SIZE;
@@ -134,7 +141,8 @@ void tdma_supervisor_init(struct tx_spec_s _tx_spec, uint8_t target_body_id, str
     rts_received_sleep = 0;
     receive_acquiring_medium = true;
     last_start_send = 0;
-
+    n1 = 0;
+    n2 = 0;
     num_successful_recieves = 0;
     num_successful_transmits = 0;
     num_rts_received = 0;
@@ -162,11 +170,12 @@ void tdma_supervisor_init(struct tx_spec_s _tx_spec, uint8_t target_body_id, str
                                                                DW1000_IRQ_MASK(DW1000_SYS_STATUS_RXOVRR) |
                                                                DW1000_IRQ_MASK(DW1000_SYS_STATUS_TXFRS));
     //register irq listener task
-
+    listener_thread = _listener_thread;
+    lpworker_thread = _lpworker_thread;
     worker_thread_add_listener_task(listener_thread, &uwb_instance.irq_listener_task, uwb_instance.irq_topic, dw1000_sys_status_handler, NULL);
 
-    worker_thread_add_timer_task(worker_thread, &status_task, status_checker, NULL, MS2ST(2), true);
-    worker_thread_add_timer_task(worker_thread, &main_task, transmit_loop, NULL, US2ST(SLOT_SIZE/4), true);
+    worker_thread_add_timer_task(lpworker_thread, &status_task, status_checker, NULL, MS2ST(2), true);
+    worker_thread_add_timer_task(lpworker_thread, &main_task, transmit_loop, NULL, US2ST(SLOT_SIZE/4), true);
 
     //since we are supervisor our data_slot_id is 0
     tx_spec.data_slot_id = 0;
@@ -373,12 +382,21 @@ static void handle_receive_event(void)
             }
             num_subordinate_receives++;
             //TODO: calibration routine
-            update_twr_cal_rx(&msg, &tx_spec, rx_info.timestamp);
+            if((tx_spec.ant_delay_cal_status > 0) &&
+            (msg.tx_spec.ant_delay_cal_status > 0)) {
+                update_twr_cal_rx(&msg, &tx_spec, rx_info.timestamp);
+            }
         } else if (msg.tdma_spec.target_body_id == tx_spec.body_id) {
             //We are receiving data from a body
             schedule_dack = true;
             //morph the slot start timestamp based on the last received packet from body
             slot_start_timestamp = rx_info.timestamp - DW1000_SID2ST(msg.tx_spec.data_slot_id);
+            if (msg.tx_spec.data_slot_id == 0 ) {
+                n1++;
+            }
+            if (msg.tx_spec.data_slot_id == 1) {
+                n2++;
+            }
             update_twr_rx(&msg, &tx_spec, rx_info.timestamp);
             new_range = true;
             range = msg.ds_twr_data[0].tprop;
@@ -409,17 +427,17 @@ static void transmit_loop(struct worker_thread_timer_task_s* task)
     }
     last_us = micros();
     if ((millis() - last_perf_print) > 5000) {
-        /*uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "\nSuper PERF",
-            "\nPERIOD: %lu/%lu RXOVRR: %d", (uint32_t)(avg_period/perf_cnt), (uint32_t)max_period, num_rx_ovrr);*/
-        /*uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Super PERF",
-            "NID:%x TX: %d RX: %d Rate: %d RTS: %d CTS: %d/%d DS: %d/%d DACK: %d", 
+        uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "\nSuper PERF",
+            "\nPERIOD: %lu/%lu RXOVRR: %d", (uint32_t)(avg_period/perf_cnt), (uint32_t)max_period, num_rx_ovrr);
+        uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Super PERF",
+            "NID:%x TX: %d RX: %d/%d Rate: %d Range: %ld/%ld", //RTS: %d CTS: %d/%d DS: %d/%d DACK: %d", 
             tx_spec.node_id,
-            num_successful_transmits, num_successful_recieves,
-            (num_successful_recieves - last_successful_recieves)/5,
-            num_rts_received, num_rts_sent, num_cts_received, num_cts_sent, num_ds_received, num_dack_received);
-        */
+            num_successful_transmits, n1, n2,
+            (num_successful_recieves - last_successful_recieves)/5,get_range(0), get_range(1));
+            //num_rts_received, num_rts_sent, num_cts_received, num_cts_sent, num_ds_received, num_dack_received);
+        
         /*uavcan_send_debug_msg(UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG, "Super PERF","NSR: %d", num_subordinate_receives);*/
-        print_cal_status(&tdma_spec, &tx_spec);
+        //print_cal_status(&tdma_spec, &tx_spec);
         last_successful_recieves = num_successful_recieves;
         last_perf_print = millis();
         perf_cnt = 0;
